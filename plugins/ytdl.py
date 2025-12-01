@@ -1,6 +1,15 @@
 # ---------------------------------------------------
-# File Name: ytdl.py
-# Description: Fixed cookie handling for downloads
+# File Name: ytdl.py (pure code)
+# Description: A Pyrogram bot for downloading yt and other sites videos from Telegram channels or groups 
+#              and uploading them back to Telegram.
+# Author: Gagan
+# GitHub: https://github.com/devgaganin/
+# Telegram: https://t.me/team_spy_pro
+# YouTube: https://youtube.com/@dev_gagan
+# Created: 2025-01-11
+# Last Modified: 2025-01-11
+# Version: 2.0.5
+# License: MIT License
 # ---------------------------------------------------
 
 import yt_dlp
@@ -12,6 +21,7 @@ import random
 import string
 import requests
 import logging
+import time
 import math
 from shared_client import client, app
 from telethon import events
@@ -22,12 +32,15 @@ from telethon.tl.functions.messages import EditMessageRequest
 from devgagantools import fast_upload
 from concurrent.futures import ThreadPoolExecutor
 import aiohttp 
+import logging
 import aiofiles
 from config import YT_COOKIES, INSTA_COOKIES
 from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
 from mutagen.mp3 import MP3
  
 logger = logging.getLogger(__name__)
+ 
+ 
 thread_pool = ThreadPoolExecutor()
 ongoing_downloads = {}
  
@@ -43,6 +56,7 @@ def d_thumbnail(thumbnail_url, save_path):
         logger.error(f"Failed to download thumbnail: {e}")
         return None
  
+ 
 async def download_thumbnail_async(url, path):
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -50,19 +64,23 @@ async def download_thumbnail_async(url, path):
                 with open(path, 'wb') as f:
                     f.write(await response.read())
  
+ 
 async def extract_audio_async(ydl_opts, url):
     def sync_extract():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=True)
     return await asyncio.get_event_loop().run_in_executor(thread_pool, sync_extract)
  
+ 
 def get_random_string(length=7):
     characters = string.ascii_letters + string.digits
     return ''.join(random.choice(characters) for _ in range(length)) 
  
+ 
 async def process_audio(client, event, url, cookies_env_var=None):
-    # Fix: cookies_env_var is now the actual cookie content, not the name string
-    cookies = cookies_env_var
+    cookies = None
+    if cookies_env_var:
+        cookies = cookies_env_var
  
     temp_cookie_path = None
     if cookies:
@@ -83,13 +101,17 @@ async def process_audio(client, event, url, cookies_env_var=None):
         'noplaylist': True,
     }
     prog = None
+ 
     progress_message = await event.reply("**__Starting audio extraction...__**")
  
     try:
+         
         info_dict = await extract_audio_async(ydl_opts, url)
         title = info_dict.get('title', 'Extracted Audio')
+ 
         await progress_message.edit("**__Editing metadata...__**")
  
+         
         if os.path.exists(download_path):
             def edit_metadata():
                 audio_file = MP3(download_path, ID3=ID3)
@@ -114,6 +136,9 @@ async def process_audio(client, event, url, cookies_env_var=None):
  
             await asyncio.to_thread(edit_metadata)
  
+         
+ 
+         
         chat_id = event.chat_id
         if os.path.exists(download_path):
             await progress_message.delete()
@@ -130,6 +155,11 @@ async def process_audio(client, event, url, cookies_env_var=None):
         else:
             await event.reply("**__Audio file not found after extraction!__**")
  
+    except yt_dlp.utils.DownloadError as e:
+        if "Sign in to confirm" in str(e) or "cookies" in str(e).lower():
+            await event.reply("**❌ YouTube Error: Authentication Failed**\n\nYouTube requires you to sign in. This means your `YT_COOKIES` in Koyeb are missing, invalid, or expired.\n\n**How to Fix:**\n1. Export fresh cookies from your browser (Netscape format).\n2. Update the `YT_COOKIES` variable in Koyeb.\n3. Redeploy.")
+        else:
+            await event.reply(f"**__Download Error: {e}__**")
     except Exception as e:
         logger.exception("Error during audio extraction or upload")
         await event.reply(f"**__An error occurred: {e}__**")
@@ -155,11 +185,9 @@ async def handler(event):
  
     try:
         if "instagram.com" in url:
-            # Fix: Pass the INSTA_COOKIES variable, not the string "INSTA_COOKIES"
-            await process_audio(client, event, url, cookies_env_var=INSTA_COOKIES)
+            await process_audio(client, event, url, cookies_env_var="INSTA_COOKIES")
         elif "youtube.com" in url or "youtu.be" in url:
-            # Fix: Pass the YT_COOKIES variable, not the string "YT_COOKIES"
-            await process_audio(client, event, url, cookies_env_var=YT_COOKIES)
+            await process_audio(client, event, url, cookies_env_var="YT_COOKIES")
         else:
             await process_audio(client, event, url)
     except Exception as e:
@@ -173,11 +201,13 @@ async def fetch_video_info(url, ydl_opts, progress_message, check_duration_and_s
         info_dict = ydl.extract_info(url, download=False)
  
         if check_duration_and_size:
+             
             duration = info_dict.get('duration', 0)
             if duration and duration > 3 * 3600:   
                 await progress_message.edit("**❌ __Video is longer than 3 hours. Download aborted...__**")
                 return None
-            
+ 
+             
             estimated_size = info_dict.get('filesize_approx', 0)
             if estimated_size and estimated_size > 2 * 1024 * 1024 * 1024:   
                 await progress_message.edit("**🤞 __Video size is larger than 2GB. Aborting download.__**")
@@ -189,9 +219,11 @@ def download_video(url, ydl_opts):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
  
+ 
 @client.on(events.NewMessage(pattern="/dl"))
 async def handler(event):
     user_id = event.sender_id
+ 
      
     if user_id in ongoing_downloads:
         await event.reply("**You already have an ongoing ytdlp download. Please wait until it completes!**")
@@ -203,36 +235,36 @@ async def handler(event):
  
     url = event.message.text.split()[1]
  
+     
     try:
         if "instagram.com" in url:
-            # Fix: Pass INSTA_COOKIES variable
-            await process_video(client, event, url, INSTA_COOKIES, check_duration_and_size=False)
-        elif "youtube.com" in url or "youtu.be" in url:
-            # Fix: Pass YT_COOKIES variable
-            await process_video(client, event, url, YT_COOKIES, check_duration_and_size=True)
-        else:
-            await process_video(client, event, url, None, check_duration_and_size=False)
- 
-    except Exception as e:
-        await event.reply(f"**An error occurred:** `{e}`")
-    finally:
-        ongoing_downloads.pop(user_id, None)
- 
+            await process_video(client, event, url, "INSTA_COOKIES", check_duration_and_size=False)
 user_progress = {}
  
 def progress_callback(done, total, user_id):
+     
     if user_id not in user_progress:
         user_progress[user_id] = {
             'previous_done': 0,
             'previous_time': time.time()
         }
+ 
+     
     user_data = user_progress[user_id]
+ 
+     
     percent = (done / total) * 100
+ 
+     
     completed_blocks = int(percent // 10)
     remaining_blocks = 10 - completed_blocks
     progress_bar = "♦" * completed_blocks + "◇" * remaining_blocks
+ 
+     
     done_mb = done / (1024 * 1024)   
     total_mb = total / (1024 * 1024)
+ 
+     
     speed = done - user_data['previous_done']
     elapsed_time = time.time() - user_data['previous_time']
  
@@ -242,16 +274,19 @@ def progress_callback(done, total, user_id):
     else:
         speed_mbps = 0
  
+     
     if speed_bps > 0:
         remaining_time = (total - done) / speed_bps
     else:
         remaining_time = 0
  
+     
     remaining_time_min = remaining_time / 60
  
+     
     final = (
         f"╭──────────────────╮\n"
-        f"│        **__Uploading...__** \n"
+        f"│        **__Uploading...__**       \n"
         f"├──────────\n"
         f"│ {progress_bar}\n\n"
         f"│ **__Progress:__** {percent:.2f}%\n"
@@ -259,23 +294,29 @@ def progress_callback(done, total, user_id):
         f"│ **__Speed:__** {speed_mbps:.2f} Mbps\n"
         f"│ **__Time Remaining:__** {remaining_time_min:.2f} min\n"
         f"╰──────────────────╯\n\n"
-        f"**__Powered by Zain__**"
+        f"**__Powered by Team SPY__**"
     )
+ 
+     
     user_data['previous_done'] = done
     user_data['previous_time'] = time.time()
+ 
     return final
  
 async def process_video(client, event, url, cookies_env_var, check_duration_and_size=False):
     start_time = time.time()
     logger.info(f"Received link: {url}")
      
-    # Fix: cookies_env_var is now the content, not the name
-    cookies = cookies_env_var
+    cookies = None
+    if cookies_env_var:
+        cookies = cookies_env_var
  
+     
     random_filename = get_random_string() + ".mp4"
     download_path = os.path.abspath(random_filename)
     logger.info(f"Generated random download path: {download_path}")
  
+     
     temp_cookie_path = None
     if cookies:
         with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
@@ -283,9 +324,11 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
             temp_cookie_path = temp_cookie_file.name
         logger.info(f"Created temporary cookie file at: {temp_cookie_path}")
  
+     
     thumbnail_file = None
     metadata = {'width': None, 'height': None, 'duration': None, 'thumbnail': None}
  
+     
     ydl_opts = {
         'outtmpl': download_path,
         'format': 'best',
@@ -313,6 +356,7 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
         thumbnail_url = info_dict.get('thumbnail', None)
         THUMB = None
  
+         
         if thumbnail_url:
             thumbnail_file = os.path.join(tempfile.gettempdir(), get_random_string() + ".jpg")
             downloaded_thumb = d_thumbnail(thumbnail_url, thumbnail_file)
@@ -359,16 +403,23 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
                 await prog.delete()
         else:
             await event.reply("**__File not found after download. Something went wrong!__**")
+    except yt_dlp.utils.DownloadError as e:
+        if "Sign in to confirm" in str(e) or "cookies" in str(e).lower():
+            await event.reply("**❌ YouTube Error: Authentication Failed**\n\nYouTube requires you to sign in. This means your `YT_COOKIES` in Koyeb are missing, invalid, or expired.\n\n**How to Fix:**\n1. Export fresh cookies from your browser (Netscape format).\n2. Update the `YT_COOKIES` variable in Koyeb.\n3. Redeploy.")
+        else:
+            await event.reply(f"**__Download Error: {e}__**")
     except Exception as e:
         logger.exception("An error occurred during download or upload.")
         await event.reply(f"**__An error occurred: {e}__**")
     finally:
+         
         if os.path.exists(download_path):
             os.remove(download_path)
         if temp_cookie_path and os.path.exists(temp_cookie_path):
             os.remove(temp_cookie_path)
         if thumbnail_file and os.path.exists(thumbnail_file):
             os.remove(thumbnail_file)
+ 
 
 async def split_and_upload_file(app, sender, file_path, caption):
     if not os.path.exists(file_path):
@@ -386,12 +437,15 @@ async def split_and_upload_file(app, sender, file_path, caption):
             if not chunk:
                 break
 
+            # Create part filename
             base_name, file_ext = os.path.splitext(file_path)
             part_file = f"{base_name}.part{str(part_number).zfill(3)}{file_ext}"
 
+            # Write part to file
             async with aiofiles.open(part_file, mode="wb") as part_f:
                 await part_f.write(chunk)
 
+            # Uploading part
             edit = await app.send_message(sender, f"⬆️ Uploading part {part_number + 1}...")
             part_caption = f"{caption} \n\n**Part : {part_number + 1}**"
             await app.send_document(sender, document=part_file, caption=part_caption,
@@ -400,10 +454,12 @@ async def split_and_upload_file(app, sender, file_path, caption):
             )
             await edit.delete()
             os.remove(part_file)
+
             part_number += 1
 
     await start.delete()
     os.remove(file_path)
+
 
 PROGRESS_BAR = """
 │ **__Completed:__** {1}/{2}
@@ -414,6 +470,9 @@ PROGRESS_BAR = """
 """
 
 async def get_seconds(time_string: str) -> int:
+    """
+    Converts a time string (e.g., '5min', '2hour') into seconds.
+    """
     def extract_value_and_unit(ts: str):
         value = ''.join(filter(str.isdigit, ts))
         unit = ts[len(value):].strip()
@@ -421,14 +480,23 @@ async def get_seconds(time_string: str) -> int:
     
     value, unit = extract_value_and_unit(time_string)
     time_units = {
-        's': 1, 'min': 60, 'hour': 3600, 'day': 86400,
-        'month': 86400 * 30, 'year': 86400 * 365
+        's': 1,
+        'min': 60,
+        'hour': 3600,
+        'day': 86400,
+        'month': 86400 * 30,
+        'year': 86400 * 365
     }
+    
     return value * time_units.get(unit, 0)
 
 async def progress_bar(current: int, total: int, ud_type: str, message, start: float):
+    """
+    Updates the progress bar for an ongoing process.
+    """
     now = time.time()
     diff = now - start
+    
     if round(diff % 10) == 0 or current == total:
         percentage = (current * 100) / total
         speed = current / diff if diff else 0
@@ -436,6 +504,7 @@ async def progress_bar(current: int, total: int, ud_type: str, message, start: f
         time_to_completion = round((total - current) / speed) * 1000 if speed else 0
         estimated_total_time = elapsed_time + time_to_completion
 
+        elapsed_time_str = TimeFormatter(elapsed_time)
         estimated_total_time_str = TimeFormatter(estimated_total_time)
 
         progress = "".join(["♦" for _ in range(math.floor(percentage / 10))]) + \
@@ -454,30 +523,43 @@ async def progress_bar(current: int, total: int, ud_type: str, message, start: f
             pass
 
 def humanbytes(size: int) -> str:
-    if not size: return ""
+    """
+    Converts bytes into a human-readable format.
+    """
+    if not size:
+        return ""
+    
     power = 2**10
     units = ['B', 'KB', 'MB', 'GB', 'TB']
     n = 0
     while size > power and n < len(units) - 1:
         size /= power
         n += 1
+    
     return f"{round(size, 2)} {units[n]}"
 
 def TimeFormatter(milliseconds: int) -> str:
+    """
+    Formats milliseconds into a human-readable duration.
+    """
     seconds, milliseconds = divmod(milliseconds, 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     days, hours = divmod(hours, 24)
+    
     parts = []
     if days: parts.append(f"{days}d")
     if hours: parts.append(f"{hours}h")
     if minutes: parts.append(f"{minutes}m")
     if seconds: parts.append(f"{seconds}s")
     if milliseconds: parts.append(f"{milliseconds}ms")
+    
     return ', '.join(parts)
 
 def convert(seconds: int) -> str:
+    """
+    Converts seconds into HH:MM:SS format.
+    """
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours}:{minutes:02d}:{seconds:02d}"
-

@@ -193,9 +193,9 @@ async def handler(event):
  
     try:
         if "instagram.com" in url:
-            await process_audio(client, event, url, cookies_env_var="INSTA_COOKIES")
+            await process_audio(client, event, url, cookies_env_var=INSTA_COOKIES)
         elif "youtube.com" in url or "youtu.be" in url:
-            await process_audio(client, event, url, cookies_env_var="YT_COOKIES")
+            await process_audio(client, event, url, cookies_env_var=YT_COOKIES)
         else:
             await process_audio(client, event, url)
     except Exception as e:
@@ -246,9 +246,9 @@ async def handler(event):
      
     try:
         if "instagram.com" in url:
-            await process_video(client, event, url, "INSTA_COOKIES", check_duration_and_size=False)
+            await process_video(client, event, url, INSTA_COOKIES, check_duration_and_size=False)
         elif "youtube.com" in url or "youtu.be" in url:
-            await process_video(client, event, url, "YT_COOKIES", check_duration_and_size=True)
+            await process_video(client, event, url, YT_COOKIES, check_duration_and_size=True)
         else:
             await process_video(client, event, url, None, check_duration_and_size=False)
  

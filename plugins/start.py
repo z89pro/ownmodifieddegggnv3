@@ -6,44 +6,55 @@ from shared_client import app
 from pyrogram import filters
 from pyrogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from config import OWNER_ID, FORCE_SUB, JOIN_LINK
-from utils.func import subscribe as check_sub
 
-# Helper function to check subscription
-async def check_subscription(client, message):
-    # Ignore if FORCE_SUB is the default dummy value or None
+async def subscribe(app, message):
+    # If FORCE_SUB is not set or is the default dummy ID, skip the check
     if not FORCE_SUB or FORCE_SUB == -10012345567:
         return 0
         
     try:
-        user = await client.get_chat_member(FORCE_SUB, message.from_user.id)
-        if user.status == "banned":
+        user = await app.get_chat_member(FORCE_SUB, message.from_user.id)
+        if user.status == "ChatMemberStatus.BANNED":
             await message.reply_text("🚫 You are banned from the channel. Contact Admin.")
             return 1
-    except Exception:
-        # User is not a participant
-        try:
-            link = await client.export_chat_invite_link(FORCE_SUB)
-        except:
-            link = JOIN_LINK # Fallback to join link if bot isn't admin
+    except Exception as e:
+        # If user is not a participant, or any other error (like channel not found), show join link
+        # We only return 1 (block) if we are sure they need to join and haven't.
+        # If the channel is invalid, we shouldn't block the user, but for now we assume it's a join request.
+        
+        # Check if the error is strictly about not being a participant
+        if "USER_NOT_PARTICIPANT" in str(e) or "UserNotParticipant" in str(e):
+            try:
+                link = await app.export_chat_invite_link(FORCE_SUB)
+            except:
+                link = JOIN_LINK
             
-        await message.reply_photo(
-            photo="https://graph.org/file/d44f024a08ded19452152.jpg",
-            caption=f"👋 **Welcome {message.from_user.first_name}!**\n\n⚠️ You must join our updates channel to use this bot.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 Join Channel", url=link)],
-                [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{client.me.username}?start=start")]
-            ])
-        )
-        return 1
+            caption = f"👋 **Welcome {message.from_user.first_name}!**\n\n⚠️ You must join our updates channel to use this bot."
+            await message.reply_photo(
+                photo="https://graph.org/file/d44f024a08ded19452152.jpg",
+                caption=caption, 
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📢 Join Channel", url=link)],
+                    [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{app.me.username}?start=start")]
+                ])
+            )
+            return 1
+        
+        # If the error is CHANNEL_INVALID (dummy ID), we just let them pass (return 0)
+        if "CHANNEL_INVALID" in str(e) or "400" in str(e):
+            return 0
+            
+        print(f"Subscription Check Error: {e}")
+        return 0 # Default to allowing access if check fails technically
+    
     return 0
 
 @app.on_message(filters.command("start"))
 async def start_handler(client, message):
     # Check subscription first
-    if await check_subscription(client, message) == 1:
+    if await subscribe(client, message) == 1:
         return
 
-    # Standard Welcome Message (Replaces the broken obfuscated code)
     welcome_caption = (
         f"👋 **Hi {message.from_user.first_name}!**\n\n"
         "I am a **Restricted Content Saver Bot**.\n"
@@ -61,7 +72,7 @@ async def start_handler(client, message):
     ])
 
     await message.reply_photo(
-        photo="https://graph.org/file/d44f024a08ded19452152.jpg", # You can change this image URL
+        photo="https://graph.org/file/d44f024a08ded19452152.jpg",
         caption=welcome_caption,
         reply_markup=buttons
     )
@@ -87,10 +98,9 @@ async def set_commands(_, message):
  
     await message.reply("✅ Commands configured successfully!")
 
-# Help and Terms handlers remain similar but cleaned up
 @app.on_message(filters.command("help"))
 async def help_command(client, message):
-    if await check_subscription(client, message) == 1:
+    if await subscribe(client, message) == 1:
         return
     
     help_text = (

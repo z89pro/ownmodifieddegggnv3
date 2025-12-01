@@ -8,8 +8,15 @@ import importlib
 import os
 import sys
 
+# Global variables to store client instances
+client = None
+app = None
+userbot = None
+
 async def load_and_run_plugins():
-    await start_client()
+    global client, app, userbot
+    # Capture the returned client instances
+    client, app, userbot = await start_client()
     plugin_dir = "plugins"
     plugins = [f[:-3] for f in os.listdir(plugin_dir) if f.endswith(".py") and f != "__init__.py"]
 

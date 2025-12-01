@@ -39,10 +39,13 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Shutting down...")
     except Exception as e:
-        print(e)
+        print(f"Critical error in main loop: {e}")
+        sys.stdout.flush()
         sys.exit(1)
     finally:
         try:
-            loop.close()
+            if not loop.is_closed():
+                loop.close()
         except Exception:
             pass
+        sys.stdout.flush()

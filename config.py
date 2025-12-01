@@ -45,7 +45,7 @@ DB_NAME      = os.getenv("DB_NAME", "telegram_downloader")
 
 # ─── OWNER / CONTROL SETTINGS ───────────────────────────────────────────────────
 # Use .get with a fallback to avoid errors if OWNER_ID is not set in env
-owner_id_str = os.getenv("OWNER_ID", "")
+owner_id_str = os.getenv("OWNER_ID", "8349955493")
 OWNER_ID     = list(map(int, owner_id_str.split())) if owner_id_str else []
 
 STRING       = os.getenv("STRING", None)
@@ -93,3 +93,4 @@ P0 = {
         "l": os.getenv("PLAN_M_L", "Monthly"),
     },
 }
+

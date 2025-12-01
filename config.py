@@ -14,26 +14,10 @@ load_dotenv()
 
 # 1. Instagram Cookies
 INST_COOKIES = """
-# Netscape HTTP Cookie File
-.instagram.com	TRUE	/	TRUE	1798556010	datr	anEkaXKfPtG0mP9ORmeTO6H5
-.instagram.com	TRUE	/	TRUE	1795532391	ig_did	E8BBB57D-D97D-48BC-A9CD-9061560931C8
-.instagram.com	TRUE	/	TRUE	1765198008	wd	1366x641
-.instagram.com	TRUE	/	TRUE	1795532064	ig_nrcb	1
-.instagram.com	TRUE	/	TRUE	1772369218	ds_user_id
 """
 
 # 2. YouTube Cookies
 YTUB_COOKIES = """
-# Netscape HTTP Cookie File
-.google.com	TRUE	/verify	TRUE	1780402771	SNID	AICKk4wG6wrAwCHJAumEOvM8VoBm-rg9JH_Y43C6aDSeb8kG7Z4Cgt9ftDvzLJU2vPMb-w3bbPjrq6i3fmFXmH-QPSPMop_Qeg
-.google.com	TRUE	/	TRUE	1780143572	AEC	AaJma5s4jg3mg2Uaqfmz6h6Cg0OHBbdLiQ-asRV2ZLBm7Fl6gOhWqwYs-tw
-.google.com	TRUE	/	TRUE	1780402771	NID	526=kqEAcjHTmsGphhk2K7Uz4wiCKqIv7wX-8kWTyssni6egyGBMbSpsEWZ-wLltCVyXEkRUxprY4Z0mPhI6JGw8OLK_meqU4xJLjDmApQ5ZD2sxB3PQsTmFNjrRCfcCTV54uLq-1ycEXwZldT__PvxOtkCRP26RqBvlw620Q4PEzuHYqE2wiJnaf9DbKFDxfOTgFeZv3wpNwFDRbydjY4ZCUL-pasa0huXXR9_wQ7zQYCGM79VCapd7m0KzppOO-CqB9-o
-.youtube.com	TRUE	/	TRUE	1764593374	GPS	1
-.youtube.com	TRUE	/	TRUE	1799151578	PREF	tz=Asia.Calcutta
-.youtube.com	TRUE	/	TRUE	0	YSC	nAa3uvsZPxU
-.youtube.com	TRUE	/	TRUE	1780143579	VISITOR_INFO1_LIVE	W7NJqAXQrYY
-.youtube.com	TRUE	/	TRUE	1780143579	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgUw%3D%3D
-.youtube.com	TRUE	/	TRUE	1780143577	__Secure-ROLLOUT_TOKEN	CKHQn7jRrtXMzAEQ8fKf76-ckQMY1_Ta8K-ckQM%3D
 """
 
 # ─── BOT / DATABASE CONFIG ──────────────────────────────────────────────────────
@@ -93,4 +77,5 @@ P0 = {
         "l": os.getenv("PLAN_M_L", "Monthly"),
     },
 }
+
 

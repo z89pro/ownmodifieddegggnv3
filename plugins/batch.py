@@ -403,23 +403,25 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
             # We will try split if file > 1.95GB and 7z is available.
             
             if fsize > 1.95:
-                # Check for 7z
-                has_7z = False
-                try:
-                    proc = await asyncio.create_subprocess_exec('7z', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                    await proc.communicate()
-                    has_7z = True
-                except FileNotFoundError:
-                    pass
+                # Check for 7z or 7zz
+                seven_z_cmd = None
+                for cmd in ['7z', '7zz']:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                        await proc.communicate()
+                        seven_z_cmd = cmd
+                        break
+                    except FileNotFoundError:
+                        pass
                 
-                if has_7z:
+                if seven_z_cmd:
                     # await c.edit_message_text(d, p.id, 'Splitting file...')
                     p_args = [c, smsg, time.time(), "SPLITTING", c_name, processed, total, batch_start_time, uid, task_type]
                     
                     # Split logic
                     abs_file_path = os.path.abspath(f)
                     zip_base = abs_file_path + ".zip"
-                    cmd_args = ["7z", "a", "-v1950m", zip_base, abs_file_path]
+                    cmd_args = [seven_z_cmd, "a", "-v1950m", zip_base, abs_file_path]
                     
                     process = await asyncio.create_subprocess_exec(
                         *cmd_args,

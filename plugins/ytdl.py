@@ -1,6 +1,6 @@
 # ---------------------------------------------------
 # File Name: ytdl.py
-# Description: Robust YouTube/Media Downloader with Cookie Support
+# Description: Fixed Download Logic with Cookies
 # ---------------------------------------------------
 
 import yt_dlp
@@ -14,7 +14,7 @@ import logging
 import aiohttp 
 from concurrent.futures import ThreadPoolExecutor
 
-# Import Config and Client
+# Import Client & Config
 from shared_client import client
 from telethon import events
 from telethon.tl.types import DocumentAttributeVideo
@@ -86,11 +86,9 @@ async def process_audio(client, event, url, cookies_content=None):
         if 'requested_downloads' in info_dict:
             file_path = info_dict['requested_downloads'][0]['filepath']
         else:
-            # Fallback guess
             file_path = output_template.replace("%(ext)s", "mp3")
 
         if not os.path.exists(file_path):
-            # Try finding any mp3 with that prefix
             import glob
             files = glob.glob(f"audio_{user_id}_{random_id}*.mp3")
             if files:
@@ -192,10 +190,8 @@ async def process_video(client, event, url, cookies_content=None):
             file_path = info_dict['requested_downloads'][0]['filepath']
         
         if not file_path or not os.path.exists(file_path):
-            # Fallback search
             import glob
             files = glob.glob(f"video_{user_id}_{random_id}*")
-            # Filter out non-video files like .jpg (thumbnails)
             video_files = [f for f in files if not f.endswith(('.jpg', '.webp', '.png', '.txt'))]
             if video_files:
                 file_path = video_files[0]
@@ -243,7 +239,7 @@ async def process_video(client, event, url, cookies_content=None):
     except Exception as e:
         err_msg = str(e)
         if "Sign in" in err_msg:
-            await msg.edit("❌ **Cookie Error:** YouTube requires login. Update `YT_COOKIES` in config.")
+            await msg.edit("❌ **Cookie Error:** YouTube requires login. Cookies might be expired.")
         else:
             await msg.edit(f"❌ **Error:** `{err_msg[:200]}`")
         logger.error(f"Video Error: {e}")

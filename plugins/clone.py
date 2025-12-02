@@ -5,7 +5,6 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from shared_client import app
 from utils.func import get_user_data
-from plugins.batch import get_uclient, get_ubot
 from pyrogram.types import Message
 
 # State Management for Clone
@@ -29,13 +28,15 @@ async def clone_handler(client, message):
     if uid not in CLONE_STATE:
         return
     
+    # DYNAMIC IMPORT to avoid circular dependency with batch.py
+    from plugins.batch import get_uclient, get_ubot
+    
     state = CLONE_STATE[uid]
     step = state["step"]
     text = message.text.strip()
 
     # --- STEP 1: GET SOURCE CHANNEL ---
     if step == 1:
-        # Validate ID
         try:
             if text.startswith("-100"):
                 source_id = int(text)
@@ -90,13 +91,7 @@ async def clone_handler(client, message):
             else:
                 target_id = int("-100" + text) if text.isdigit() else text
             
-            # Decide Client (Bot vs Userbot)
             source_id = CLONE_STATE[uid]["source"]
-            is_private = str(source_id).startswith("-100") 
-            
-            # Determine which client to use for fetching
-            # If User has session, prefer Userbot (works for private & public)
-            # If no session, use Bot (works only for public)
             
             uc = await get_uclient(uid) # User Client
             worker = client # Default to Bot
@@ -114,42 +109,27 @@ async def clone_handler(client, message):
             
             for i, msg_id in enumerate(range(CLONE_STATE[uid]["start_id"], CLONE_STATE[uid]["end_id"] + 1)):
                 try:
-                    # Attempt to Copy
-                    # Note: We use copy_message to avoid "Forwarded from" tag usually, 
-                    # but if content is restricted, copy might fail without premium. 
-                    # But request is "Clone", so copy is best.
-                    
-                    # We fetch with 'worker' (User or Bot) and send with 'client' (Bot) 
-                    # OR send with 'worker' if target is also accessible by User.
-                    # Usually Bot is admin in Target.
-                    
-                    # Fetching Message
                     msg = await worker.get_messages(source_id, msg_id)
                     
                     if msg and not msg.empty:
-                        # Copying to Target using BOT (client) if possible, else worker
                         try:
-                            # Try copying using the Bot (assuming Bot is Admin in Target)
-                            # We pass 'from_chat_id' and 'message_id'
+                            # Try bot copy first
                             await client.copy_message(
                                 chat_id=target_id,
                                 from_chat_id=source_id,
                                 message_id=msg_id
                             )
                         except Exception:
-                            # If Bot can't see source (Private), we must use Userbot to fetch, 
-                            # then verify how to send.
-                            # Userbot 'copy_message' to Target
+                            # Fallback to Userbot copy
                             await worker.copy_message(chat_id=target_id, from_chat_id=source_id, message_id=msg_id)
                         
                         success += 1
-                        await asyncio.sleep(2) # Safe delay for cloning
+                        await asyncio.sleep(2) # Safe delay
                     else:
                         fail += 1
                         
                 except FloodWait as e:
                     await asyncio.sleep(e.value + 5)
-                    # Retry once logic could be added here
                 except Exception as e:
                     fail += 1
                     print(f"Clone Error {msg_id}: {e}")

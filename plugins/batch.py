@@ -14,7 +14,12 @@ from plugins.settings import rename_file
 from plugins.start import subscribe as sub
 from utils.custom_filters import login_in_progress
 from utils.encrypt import dcs
+from utils.encrypt import dcs
 from typing import Dict, Any, Optional
+from utils.progress import batch_temp, progress_bar, humanbytes, TimeFormatter
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.errors import MessageNotModified
+import math
 
 
 Y = None if not STRING else __import__('shared_client').userbot
@@ -76,6 +81,59 @@ def get_batch_info(user_id: int) -> Optional[Dict[str, Any]]:
     return ACTIVE_USERS.get(str(user_id))
 
 ACTIVE_USERS = load_active_users()
+
+ACTIVE_USERS = load_active_users()
+
+@X.on_callback_query(filters.regex("^refresh_status_"))
+async def refresh_status_handler(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    try:
+        task_type_req = query.data.split("_")[-1] 
+        unique_key = f"{user_id}_{task_type_req}"
+        data = batch_temp.PROGRESS_DATA.get(unique_key)
+    except:
+        return await query.answer("⚠️ Data Error!", show_alert=True)
+    
+    if not data:
+        return await query.answer("⚠️ Task Stopped/Completed!", show_alert=True)
+    
+    percentage = data["percentage"]
+    bar_length = 10
+    filled_length = math.floor((percentage / 100) * bar_length)
+    filled = "●"
+    empty = "○"
+    bar = (filled * filled_length) + (empty * (bar_length - filled_length))
+    
+    type_str = data["type"].upper()
+    name_str = data["file_name"][:25].upper() + "..." if len(data["file_name"]) > 25 else data["file_name"].upper()
+    processed_size = humanbytes(data["current"]).upper()
+    total_size = humanbytes(data["total"]).upper()
+    speed_str = f"{humanbytes(data['speed'])}/S".upper()
+    eta_str = TimeFormatter(data['eta'] * 1000).upper()
+    
+    total_elapsed = time.time() - data["batch_start"]
+    elapsed_str = TimeFormatter(total_elapsed * 1000).upper()
+    
+    stats = (
+        f"╭━━━━━━━━━━━━━━━━━➣\n"
+        f"┣⪼ 📦 𝗕𝗔𝗧𝗖𝗛 : {data['processed']} / {data['total_msgs']}\n"
+        f"┣⪼ 📥 𝗧𝗔𝗦𝗞 : {type_str}\n"
+        f"┃      {bar} ({percentage:.1f}%)\n"
+        f"┃ 📂 {name_str}\n"
+        f"┣⪼ ⚡ 𝗦𝗣𝗘𝗘𝗗 ➠ {speed_str}\n"
+        f"┣⪼ 🗂️ 𝗦𝗜𝗭𝗘 ➠ {processed_size} / {total_size}\n"
+        f"┣⪼ ⏳ 𝗘𝗧𝗔 ➠ {eta_str}\n"
+        f"┣⪼ ⏱ 𝗘𝗟𝗔𝗣𝗦𝗘𝗗 ➠ {elapsed_str}\n"
+        f"╰━━━┫ 𝗭 𝗔 𝗜 𝗡 ┣━━━➣"
+    )
+    
+    try:
+        await query.edit_message_text(stats, reply_markup=query.message.reply_markup)
+        await query.answer("✅ Updated!")
+    except MessageNotModified:
+        await query.answer("⚠️ No Updates!", show_alert=False)
+    except Exception as e:
+        await query.answer(f"Error: {e}", show_alert=True)
 
 async def upd_dlg(c):
     try:
@@ -200,20 +258,7 @@ async def get_uclient(uid):
             return ubot if ubot else Y
     return Y
 
-async def prog(c, t, C, h, m, st):
-    global P
-    p = c / t * 100
-    interval = 10 if t >= 100 * 1024 * 1024 else 20 if t >= 50 * 1024 * 1024 else 30 if t >= 10 * 1024 * 1024 else 50
-    step = int(p // interval) * interval
-    if m not in P or P[m] != step or p >= 100:
-        P[m] = step
-        c_mb = c / (1024 * 1024)
-        t_mb = t / (1024 * 1024)
-        bar = '🟢' * int(p / 10) + '🔴' * (10 - int(p / 10))
-        speed = c / (time.time() - st) / (1024 * 1024) if time.time() > st else 0
-        eta = time.strftime('%M:%S', time.gmtime((t - c) / (speed * 1024 * 1024))) if speed > 0 else '00:00'
-        await C.edit_message_text(h, m, f"__**Pyro Handler...**__\n\n{bar}\n\n⚡**__Completed__**: {c_mb:.2f} MB / {t_mb:.2f} MB\n📊 **__Done__**: {p:.2f}%\n🚀 **__Speed__**: {speed:.2f} MB/s\n⏳ **__ETA__**: {eta}\n\n**__Powered by Team SPY__**")
-        if p >= 100: P.pop(m, None)
+
 
 async def send_direct(c, m, tcid, ft=None, rtmid=None):
     try:
@@ -239,7 +284,7 @@ async def send_direct(c, m, tcid, ft=None, rtmid=None):
         print(f'Direct send error: {e}')
         return False
 
-async def process_msg(c, u, m, d, lt, uid, i):
+async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, processed=0, total=0, task_type="SINGLE"):
     try:
         cfg_chat = await get_user_data_key(d, 'chat_id', None)
         tcid = d
@@ -263,48 +308,64 @@ async def process_msg(c, u, m, d, lt, uid, i):
                 return 'Sent directly.'
             
             st = time.time()
-            p = await c.send_message(d, 'Downloading...')
+            # p = await c.send_message(d, 'Downloading...') # Replaced by smsg
 
             c_name = f"{time.time()}"
+            file_name = "File"
             if m.video:
                 file_name = m.video.file_name
                 if not file_name:
                     file_name = f"{time.time()}.mp4"
+                    c_name = sanitize(file_name)
+                else:
                     c_name = sanitize(file_name)
             elif m.audio:
                 file_name = m.audio.file_name
                 if not file_name:
                     file_name = f"{time.time()}.mp3"
                     c_name = sanitize(file_name)
+                else:
+                    c_name = sanitize(file_name)
             elif m.document:
                 file_name = m.document.file_name
                 if not file_name:
                     file_name = f"{time.time()}"
                     c_name = sanitize(file_name)
+                else:
+                    c_name = sanitize(file_name)
             elif m.photo:
                 file_name = f"{time.time()}.jpg"
                 c_name = sanitize(file_name)
-    
-            f = await u.download_media(m, file_name=c_name, progress=prog, progress_args=(c, d, p.id, st))
+            
+            if not batch_start_time:
+                batch_start_time = time.time()
+            
+            if not smsg:
+                 refresh_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 REFRESH STATUS", callback_data=f"refresh_status_{task_type}")]])
+                 smsg = await c.send_message(d, "**🔄 INITIALIZING TASK...**", reply_markup=refresh_btn)
+
+            progress_args = [c, smsg, time.time(), "DOWNLOADING", c_name, processed, total, batch_start_time, uid, task_type]
+
+            f = await u.download_media(m, file_name=c_name, progress=progress_bar, progress_args=progress_args)
             
             if not f:
-                await c.edit_message_text(d, p.id, 'Failed.')
+                # await c.edit_message_text(d, p.id, 'Failed.')
                 return 'Failed.'
             
-            await c.edit_message_text(d, p.id, 'Renaming...')
+            # await c.edit_message_text(d, p.id, 'Renaming...')
             if (
                 (m.video and m.video.file_name) or
                 (m.audio and m.audio.file_name) or
                 (m.document and m.document.file_name)
             ):
-                f = await rename_file(f, d, p)
+                f = await rename_file(f, d, smsg) # Passed smsg instead of p
             
             fsize = os.path.getsize(f) / (1024 * 1024 * 1024)
             th = thumbnail(d)
             
             if fsize > 2 and Y:
                 st = time.time()
-                await c.edit_message_text(d, p.id, 'File is larger than 2GB. Using alternative method...')
+                # await c.edit_message_text(d, p.id, 'File is larger than 2GB. Using alternative method...')
                 await upd_dlg(Y)
                 mtd = await get_video_metadata(f)
                 dur, h, w = mtd['duration'], mtd['width'], mtd['height']
@@ -314,6 +375,8 @@ async def process_msg(c, u, m, d, lt, uid, i):
                             'voice': Y.send_voice, 'audio': Y.send_audio, 
                             'photo': Y.send_photo, 'document': Y.send_document}
                 
+                p_args = [c, smsg, time.time(), "UPLOADING (4GB)", c_name, processed, total, batch_start_time, uid, task_type]
+
                 for mtype, func in send_funcs.items():
                     if f.endswith('.mp4'): mtype = 'video'
                     if getattr(m, mtype, None):
@@ -322,20 +385,21 @@ async def process_msg(c, u, m, d, lt, uid, i):
                                         height=h if mtype == 'video' else None,
                                         width=w if mtype == 'video' else None,
                                         caption=ft if m.caption and mtype not in ['video_note', 'voice'] else None, 
-                                        reply_to_message_id=rtmid, progress=prog, progress_args=(c, d, p.id, st))
+                                        reply_to_message_id=rtmid, progress=progress_bar, progress_args=p_args)
                         break
                 else:
                     sent = await Y.send_document(LOG_GROUP, f, thumb=th, caption=ft if m.caption else None,
-                                                reply_to_message_id=rtmid, progress=prog, progress_args=(c, d, p.id, st))
+                                                reply_to_message_id=rtmid, progress=progress_bar, progress_args=p_args)
                 
                 await c.copy_message(d, LOG_GROUP, sent.id)
                 os.remove(f)
-                await c.delete_messages(d, p.id)
+                # await c.delete_messages(d, p.id)
                 
                 return 'Done (Large file).'
             
-            await c.edit_message_text(d, p.id, 'Uploading...')
+            # await c.edit_message_text(d, p.id, 'Uploading...')
             st = time.time()
+            p_args = [c, smsg, time.time(), "UPLOADING", c_name, processed, total, batch_start_time, uid, task_type]
 
             try:
                 video_extensions = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.ogv']
@@ -347,39 +411,39 @@ async def process_msg(c, u, m, d, lt, uid, i):
                     th = await screenshot(f, dur, d)
                     await c.send_video(tcid, video=f, caption=ft if m.caption else None, 
                                     thumb=th, width=w, height=h, duration=dur, 
-                                    progress=prog, progress_args=(c, d, p.id, st), 
+                                    progress=progress_bar, progress_args=p_args, 
                                     reply_to_message_id=rtmid)
                 elif m.video_note:
-                    await c.send_video_note(tcid, video_note=f, progress=prog, 
-                                        progress_args=(c, d, p.id, st), reply_to_message_id=rtmid)
+                    await c.send_video_note(tcid, video_note=f, progress=progress_bar, 
+                                        progress_args=p_args, reply_to_message_id=rtmid)
                 elif m.voice:
-                    await c.send_voice(tcid, f, progress=prog, progress_args=(c, d, p.id, st), 
+                    await c.send_voice(tcid, f, progress=progress_bar, progress_args=p_args, 
                                     reply_to_message_id=rtmid)
                 elif m.sticker:
                     await c.send_sticker(tcid, m.sticker.file_id, reply_to_message_id=rtmid)
                 elif m.audio or (m.document and file_ext in audio_extensions):
                     await c.send_audio(tcid, audio=f, caption=ft if m.caption else None, 
-                                    thumb=th, progress=prog, progress_args=(c, d, p.id, st), 
+                                    thumb=th, progress=progress_bar, progress_args=p_args, 
                                     reply_to_message_id=rtmid)
                 elif m.photo:
                     await c.send_photo(tcid, photo=f, caption=ft if m.caption else None, 
-                                    progress=prog, progress_args=(c, d, p.id, st), 
+                                    progress=progress_bar, progress_args=p_args, 
                                     reply_to_message_id=rtmid)
                 elif m.document:
                     await c.send_document(tcid, document=f, caption=ft if m.caption else None, 
-                                        progress=prog, progress_args=(c, d, p.id, st), 
+                                        progress=progress_bar, progress_args=p_args, 
                                         reply_to_message_id=rtmid)
                 else:
                     await c.send_document(tcid, document=f, caption=ft if m.caption else None, 
-                                        progress=prog, progress_args=(c, d, p.id, st), 
+                                        progress=progress_bar, progress_args=p_args, 
                                         reply_to_message_id=rtmid)
             except Exception as e:
-                await c.edit_message_text(d, p.id, f'Upload failed: {str(e)[:30]}')
+                # await c.edit_message_text(d, p.id, f'Upload failed: {str(e)[:30]}')
                 if os.path.exists(f): os.remove(f)
                 return 'Failed.'
             
             os.remove(f)
-            await c.delete_messages(d, p.id)
+            # await c.delete_messages(d, p.id)
             
             return 'Done.'
             
@@ -456,36 +520,42 @@ async def text_handler(c, m):
 
         Z[uid].update({'step': 'process_single', 'cid': i, 'sid': d, 'lt': lt})
         i, s, lt = Z[uid]['cid'], Z[uid]['sid'], Z[uid]['lt']
-        pt = await m.reply_text('Processing...')
+        # pt = await m.reply_text('Processing...')
         
         ubot = UB.get(uid)
         if not ubot:
-            await pt.edit('Add bot with /setbot first')
+            await m.reply_text('Add bot with /setbot first')
             Z.pop(uid, None)
             return
         
         uc = await get_uclient(uid)
         if not uc:
-            await pt.edit('Cannot proceed without user client.')
+            await m.reply_text('Cannot proceed without user client.')
             Z.pop(uid, None)
             return
             
         if is_user_active(uid):
-            await pt.edit('Active task exists. Use /stop first.')
+            await m.reply_text('Active task exists. Use /stop first.')
             Z.pop(uid, None)
             return
+
+        refresh_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 REFRESH STATUS", callback_data=f"refresh_status_SINGLE")]])
+        smsg = await m.reply_text("**🔄 INITIALIZING TASK...**", reply_markup=refresh_btn)
+        batch_start_time = time.time()
 
         try:
             msg = await get_msg(ubot, uc, i, s, lt)
             if msg:
-                res = await process_msg(ubot, uc, msg, str(m.chat.id), lt, uid, i)
-                await pt.edit(f'1/1: {res}')
+                res = await process_msg(ubot, uc, msg, str(m.chat.id), lt, uid, i, smsg=smsg, batch_start_time=batch_start_time, processed=0, total=1, task_type="SINGLE")
+                await smsg.edit(f'1/1: {res}')
             else:
-                await pt.edit('Message not found')
+                await smsg.edit('Message not found')
         except Exception as e:
-            await pt.edit(f'Error: {str(e)[:50]}')
+            await smsg.edit(f'Error: {str(e)[:50]}')
         finally:
             Z.pop(uid, None)
+            unique_key = f"{uid}_SINGLE"
+            if unique_key in batch_temp.PROGRESS_DATA: del batch_temp.PROGRESS_DATA[unique_key]
 
     elif s == 'count':
         if not m.text.isdigit():
@@ -503,33 +573,37 @@ async def text_handler(c, m):
         i, s, n, lt = Z[uid]['cid'], Z[uid]['sid'], Z[uid]['num'], Z[uid]['lt']
         success = 0
 
-        pt = await m.reply_text('Processing batch...')
+        # pt = await m.reply_text('Processing batch...')
         uc = await get_uclient(uid)
         ubot = UB.get(uid)
         
         if not uc or not ubot:
-            await pt.edit('Missing client setup')
+            await m.reply_text('Missing client setup')
             Z.pop(uid, None)
             return
             
         if is_user_active(uid):
-            await pt.edit('Active task exists')
+            await m.reply_text('Active task exists')
             Z.pop(uid, None)
             return
         
+        refresh_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 REFRESH STATUS", callback_data=f"refresh_status_BATCH")]])
+        smsg = await m.reply_text("**🔄 INITIALIZING BATCH...**", reply_markup=refresh_btn)
+        batch_start_time = time.time()
+
         await add_active_batch(uid, {
             "total": n,
             "current": 0,
             "success": 0,
             "cancel_requested": False,
-            "progress_message_id": pt.id
+            "progress_message_id": smsg.id
             })
         
         try:
             for j in range(n):
                 
                 if should_cancel(uid):
-                    await pt.edit(f'Cancelled at {j}/{n}. Success: {success}')
+                    await smsg.edit(f'Cancelled at {j}/{n}. Success: {success}')
                     break
                 
                 await update_batch_progress(uid, j, success)
@@ -539,13 +613,15 @@ async def text_handler(c, m):
                 try:
                     msg = await get_msg(ubot, uc, i, mid, lt)
                     if msg:
-                        res = await process_msg(ubot, uc, msg, str(m.chat.id), lt, uid, i)
+                        try: await smsg.edit(f"**🔄 PROCESSING: {j+1}/{n}**", reply_markup=refresh_btn)
+                        except: pass
+                        res = await process_msg(ubot, uc, msg, str(m.chat.id), lt, uid, i, smsg=smsg, batch_start_time=batch_start_time, processed=j+1, total=n, task_type="BATCH")
                         if 'Done' in res or 'Copied' in res or 'Sent' in res:
                             success += 1
                     else:
                         pass
                 except Exception as e:
-                    try: await pt.edit(f'{j+1}/{n}: Error - {str(e)[:30]}')
+                    try: await smsg.edit(f'{j+1}/{n}: Error - {str(e)[:30]}')
                     except: pass
                 
                 await asyncio.sleep(10)
@@ -556,5 +632,7 @@ async def text_handler(c, m):
         finally:
             await remove_active_batch(uid)
             Z.pop(uid, None)
+            unique_key = f"{uid}_BATCH"
+            if unique_key in batch_temp.PROGRESS_DATA: del batch_temp.PROGRESS_DATA[unique_key]
 
 

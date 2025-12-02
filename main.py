@@ -7,14 +7,39 @@ from shared_client import start_client
 import importlib
 import os
 import sys
+import glob
+import logging
 
 # Global variables to store client instances
 client = None
 app = None
 userbot = None
 
+def cleanup_temp_files():
+    """Delete all temporary and corrupted files on startup"""
+    print("Cleaning up temporary files...")
+    try:
+        patterns = ['*.mp3', '*.mp4', '*.mkv', '*.jpg', '*.png', '*.webm', '*.part', '*.ytdl', '*.temp']
+        deleted_count = 0
+        
+        for pattern in patterns:
+            for file in glob.glob(pattern):
+                try:
+                    os.remove(file)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Could not delete {file}: {e}")
+        
+        if deleted_count > 0:
+            print(f"Cleaned up {deleted_count} temporary files")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
 async def load_and_run_plugins():
     global client, app, userbot
+    # Run cleanup before starting clients
+    cleanup_temp_files()
+    
     # Capture the returned client instances
     client, app, userbot = await start_client()
     plugin_dir = "plugins"

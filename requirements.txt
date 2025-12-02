@@ -1,4 +1,5 @@
-pyrofork==2.3.45
+telethon
+pyrofork
 tgcrypto
 motor
 Flask
@@ -17,3 +18,8 @@ pyromod
 ffmpeg-python
 hachoir
 pillow
+psutil
+python-dotenv
+opencv-python-headless
+cryptography
+mutagen

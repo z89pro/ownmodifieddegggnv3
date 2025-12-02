@@ -19,5 +19,4 @@ mutagen
 yt-dlp
 requests
 cryptography
-
-
+browser-cookie3

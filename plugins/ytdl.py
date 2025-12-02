@@ -14,8 +14,11 @@ from shared_client import app
 from config import YT_COOKIES, INSTA_COOKIES
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
-from utils.func import get_video_metadata, screenshot
+from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
+from utils.func import get_video_metadata, screenshot, progress_callback, fast_upload, d_thumbnail, get_random_string
 from utils.message_manager import MessageManager
+from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER
+
 from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER
 
 logger = logging.getLogger(__name__)
@@ -30,87 +33,59 @@ except ImportError:
     HELPER_AVAILABLE = False
 
 async def process_audio(client, event, url, cookies_env_var=None):
-    cookies = None
-    if cookies_env_var:
-        cookies = cookies_env_var
- 
-    temp_cookie_path = None
-    if cookies:
-        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
-            temp_cookie_file.write(cookies)
-            temp_cookie_path = temp_cookie_file.name
- 
     start_time = time.time()
     
-    # Fetch info first to get title
-    ydl_opts_info = {
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': temp_cookie_path,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            }
-        }
-    }
-
     progress_message = await event.reply("**__Starting audio extraction...__**")
 
     try:
-        # Extract info
-        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-            info_dict = await asyncio.to_thread(ydl.extract_info, url, download=False)
+        if HELPER_AVAILABLE:
+            # Use enhanced helper
+            ydl_opts = get_ydl_opts(url, cookies_env_var, format_spec='bestaudio/best')
+            ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+            ydl_opts['outtmpl'] = f"%(title)s.%(ext)s"
+            
+            info_dict = await download_with_retry(url, ydl_opts, progress_message)
+            if not info_dict:
+                return
+        else:
+            # Fallback logic
+            cookies = None
+            if cookies_env_var:
+                cookies = cookies_env_var
+            
+            temp_cookie_path = None
+            if cookies:
+                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
+                    temp_cookie_file.write(cookies)
+                    temp_cookie_path = temp_cookie_file.name
+
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': f"%(title)s.%(ext)s",
+                'cookiefile': temp_cookie_path,
+                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                'quiet': False,
+                'noplaylist': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = await asyncio.to_thread(ydl.extract_info, url, download=True)
         
+        # Common processing
         title = info_dict.get('title', 'Extracted Audio')
         sanitized_title = sanitize_filename(title)
-        # Ensure filename is not too long
         if len(sanitized_title) > 200:
             sanitized_title = sanitized_title[:200]
             
-        # Add a random suffix to avoid collisions if needed, or just rely on user isolation (but this is a bot)
-        # User asked for "jo file ke naame hai wahi aaye".
-        # I'll append a short random string to ensure uniqueness but keep the name.
-        # random_suffix = get_random_string(4)
-        # filename_base = f"{sanitized_title}_{random_suffix}"
-        # actually user wants "jo file ke naame hai wahi aaye", so maybe no random suffix?
-        # But if two users download same file, or same user twice?
-        # Overwrite is fine if it's the same content.
-        # But if different content has same title?
-        # Let's use a unique folder or just append a small hash.
-        # I will use the sanitized title directly as requested, but handle potential path issues.
-        
         filename_base = sanitized_title
         download_path = f"{filename_base}.mp3"
         
-        # If file exists, maybe append a number?
-        # For now, I'll just overwrite or let yt-dlp handle it.
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f"{filename_base}.%(ext)s",
-            'cookiefile': temp_cookie_path,
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-            'quiet': False,
-            'noplaylist': True,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'web'],
-                }
-            }
-        }
-        
-        # We already fetched info, but extract_audio_async calls extract_info(download=True).
-        # We can pass the info_dict? No, extract_audio_async creates a new YDL.
-        # We'll just run it.
-        
-        info_dict = await extract_audio_async(ydl_opts, url)
-        # info_dict might be updated
+        # Rename if needed (yt-dlp might have named it differently based on title)
+        # But we used outtmpl with title, so it should be close.
+        # Let's find the file.
+        # Actually, info_dict['requested_downloads'][0]['filepath'] gives the path.
+        if 'requested_downloads' in info_dict:
+            download_path = info_dict['requested_downloads'][0]['filepath']
         
         # ... (rest of the logic)
         
@@ -366,39 +341,6 @@ async def process_video_download(client, event, url, cookies_env_var, format_id=
     # ... (logic to download using specific format_id if provided)
     start_time = time.time()
     logger.info(f"Received link: {url}")
-     
-    cookies = None
-    if cookies_env_var:
-        cookies = cookies_env_var
- 
-    temp_cookie_path = None
-    if cookies:
-        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
-            temp_cookie_file.write(cookies)
-            temp_cookie_path = temp_cookie_file.name
-        logger.info(f"Created temporary cookie file at: {temp_cookie_path}")
- 
-     
-    thumbnail_file = None
-    metadata = {'width': None, 'height': None, 'duration': None, 'thumbnail': None}
- 
-    # If format_id is provided, use it. Otherwise use 'best'.
-    format_str = f"{format_id}+bestaudio/best" if format_id else 'best'
-
-    # Fetch info first to get title
-    ydl_opts_info = {
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': temp_cookie_path if temp_cookie_path else None,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        },
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            }
-        }
-    }
     
     # We'll just use client.send_message or event.respond
     if hasattr(event, 'reply'):
@@ -407,66 +349,77 @@ async def process_video_download(client, event, url, cookies_env_var, format_id=
         progress_message = await client.send_message(event.chat_id, "**__Starting download...__**")
         
     logger.info("Starting the download process...")
-    
+
     try:
-        # Fetch info
-        with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-            info_dict = await asyncio.to_thread(ydl.extract_info, url, download=False)
+        if HELPER_AVAILABLE:
+             # Use enhanced helper
+            format_str = f"{format_id}+bestaudio/best" if format_id else 'best'
+            ydl_opts = get_ydl_opts(url, cookies_env_var, format_spec=format_str)
+            ydl_opts['writethumbnail'] = True
+            ydl_opts['outtmpl'] = "%(title)s.%(ext)s"
             
-        if not info_dict:
-            return
+            info_dict = await download_with_retry(url, ydl_opts, progress_message)
+            if not info_dict:
+                return
+        else:
+            # Fallback logic
+            cookies = None
+            if cookies_env_var:
+                cookies = cookies_env_var
 
-        title = info_dict.get('title', 'Video')
-        sanitized_title = sanitize_filename(title)
-        if len(sanitized_title) > 200:
-            sanitized_title = sanitized_title[:200]
+            temp_cookie_path = None
+            if cookies:
+                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
+                    temp_cookie_file.write(cookies)
+                    temp_cookie_path = temp_cookie_file.name
+                logger.info(f"Created temporary cookie file at: {temp_cookie_path}")
             
-        # Determine extension
-        ext = info_dict.get('ext', 'mp4')
-        
-        filename = f"{sanitized_title}.{ext}"
-        download_path = os.path.abspath(filename)
-        
-        logger.info(f"Generated download path: {download_path}")
-
-        ydl_opts = {
-            'outtmpl': download_path,
-            'format': format_str,
-            'cookiefile': temp_cookie_path if temp_cookie_path else None,
-            'writethumbnail': True,
-            'verbose': True,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'web'],
-                }
+            # Fetch info first to get title
+            ydl_opts_info = {
+                'quiet': True,
+                'no_warnings': True,
+                'cookiefile': temp_cookie_path if temp_cookie_path else None,
             }
-        }
-        
-        # We already fetched info, but we need to download now.
-        # We can skip fetching info again if we pass it, but download_video uses a new YDL instance.
-        # We'll just let it run.
-        
-        # Note: fetch_video_info was called here before. We can reuse info_dict if we modify fetch_video_info or skip it.
-        # But fetch_video_info also checks duration/size.
-        # Let's manually check duration/size here using info_dict.
-        
-        check_duration_and_size = True # Or pass it as arg? It defaults to False in original signature but True in usage?
-        # In original code: 
-        # process_video (Insta) -> check_duration_and_size=False
-        # process_video (YouTube) -> check_duration_and_size=True
-        # But wait, process_video_download signature in my previous edit was:
-        # async def process_video_download(client, event, url, cookies_env_var, format_id=None):
-        # It didn't have check_duration_and_size arg.
-        # I should probably add it back or infer it.
-        # For now, I'll assume True for YouTube and False for others?
-        # Or just check if format_id is present (YouTube).
-        # But Insta also uses this.
-        # Let's add the argument back to the signature in a separate edit if needed, or just be lenient.
-        # Actually, I can just check the limits here.
-        
+            
+            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                info_dict = await asyncio.to_thread(ydl.extract_info, url, download=False)
+                
+            if not info_dict:
+                return
+
+            title = info_dict.get('title', 'Video')
+            sanitized_title = sanitize_filename(title)
+            if len(sanitized_title) > 200:
+                sanitized_title = sanitized_title[:200]
+                
+            ext = info_dict.get('ext', 'mp4')
+            filename = f"{sanitized_title}.{ext}"
+            download_path = os.path.abspath(filename)
+            
+            format_str = f"{format_id}+bestaudio/best" if format_id else 'best'
+            
+            ydl_opts = {
+                'outtmpl': download_path,
+                'format': format_str,
+                'cookiefile': temp_cookie_path if temp_cookie_path else None,
+                'writethumbnail': True,
+                'verbose': True,
+            }
+            
+            await asyncio.to_thread(download_video, url, ydl_opts)
+
+        # Common processing
+        if 'requested_downloads' in info_dict:
+            download_path = info_dict['requested_downloads'][0]['filepath']
+        elif not HELPER_AVAILABLE:
+             # Fallback path logic
+             pass
+        else:
+             # Helper should have returned info_dict with requested_downloads
+             # If not, maybe it wasn't a download?
+             pass
+             
+        # Check duration/size limits if needed (can be added to yt_helper or checked here)
         duration = info_dict.get('duration', 0)
         if duration and duration > 3 * 3600:   
             await progress_message.edit("**❌ __Video is longer than 3 hours. Download aborted...__**")
@@ -476,8 +429,6 @@ async def process_video_download(client, event, url, cookies_env_var, format_id=
         if estimated_size and estimated_size > 2 * 1024 * 1024 * 1024:   
              await progress_message.edit("**🤞 __Video size is larger than 2GB. Aborting download.__**")
              return
-
-        await asyncio.to_thread(download_video, url, ydl_opts)
         
         # Update metadata from info_dict
         title = info_dict.get('title', 'Powered by Team SPY')

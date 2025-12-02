@@ -2,7 +2,7 @@
 # Licensed under the GNU General Public License v3.0.  
 # See LICENSE file in the repository root for full license text.
 
-import os, re, time, asyncio, json, asyncio 
+import os, re, time, asyncio, json, asyncio, glob 
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import UserNotParticipant
@@ -397,6 +397,57 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
                 
                 return 'Done (Large file).'
             
+            # Check for split requirement (if > 2GB and not using premium userbot)
+            # OR if we want to force split for > 2GB even with premium? 
+            # TestSaveBot splits if > 1.95GB.
+            # We will try split if file > 1.95GB and 7z is available.
+            
+            if fsize > 1.95:
+                # Check for 7z
+                has_7z = False
+                try:
+                    proc = await asyncio.create_subprocess_exec('7z', stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    await proc.communicate()
+                    has_7z = True
+                except FileNotFoundError:
+                    pass
+                
+                if has_7z:
+                    # await c.edit_message_text(d, p.id, 'Splitting file...')
+                    p_args = [c, smsg, time.time(), "SPLITTING", c_name, processed, total, batch_start_time, uid, task_type]
+                    
+                    # Split logic
+                    abs_file_path = os.path.abspath(f)
+                    zip_base = abs_file_path + ".zip"
+                    cmd_args = ["7z", "a", "-v1950m", zip_base, abs_file_path]
+                    
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd_args,
+                        stdout=asyncio.subprocess.PIPE, 
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await process.communicate()
+                    
+                    if process.returncode == 0:
+                        split_files = sorted(glob.glob(f"{zip_base}.*"))
+                        os.remove(f) # Remove original
+                        
+                        for i, fp in enumerate(split_files):
+                            fname = os.path.basename(fp)
+                            part_caption = f"{ft}\n\n**Part {i+1}/{len(split_files)}**" if ft else f"**Part {i+1}/{len(split_files)}**"
+                            
+                            p_args = [c, smsg, time.time(), "UPLOADING", fname, processed, total, batch_start_time, uid, task_type]
+                            
+                            await c.send_document(tcid, document=fp, caption=part_caption, 
+                                                thumb=th, progress=progress_bar, progress_args=p_args, 
+                                                reply_to_message_id=rtmid)
+                            os.remove(fp)
+                        
+                        return 'Done (Split).'
+                    else:
+                        print(f"7z Error: {stderr.decode()}")
+                        # Fallback to normal upload attempt or fail
+                
             # await c.edit_message_text(d, p.id, 'Uploading...')
             st = time.time()
             p_args = [c, smsg, time.time(), "UPLOADING", c_name, processed, total, batch_start_time, uid, task_type]

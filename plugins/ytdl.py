@@ -15,7 +15,6 @@ from config import YT_COOKIES, INSTA_COOKIES
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
 from utils.func import get_video_metadata, screenshot
-from pyrogram.types import DocumentAttributeVideo
 from utils.message_manager import MessageManager
 from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER
 
@@ -311,7 +310,7 @@ def progress_callback(done, total, user_id):
         f"│ **__Speed:__** {speed_mbps:.2f} Mbps\n"
         f"│ **__Time Remaining:__** {remaining_time_min:.2f} min\n"
         f"╰──────────────────╯\n\n"
-        f"**__Powered By Zain__**"
+        f"**__Powered by Team SPY__**"
     )
  
      

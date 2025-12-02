@@ -8,23 +8,19 @@ from pyrogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarku
 from config import OWNER_ID, FORCE_SUB, JOIN_LINK
 
 async def subscribe(app, message):
-    # Skip if FORCE_SUB is dummy or missing
     if not FORCE_SUB or FORCE_SUB == -10012345567:
         return 0
-        
     try:
         user = await app.get_chat_member(FORCE_SUB, message.from_user.id)
         if user.status == "ChatMemberStatus.BANNED":
             await message.reply_text("🚫 You are banned from the channel.")
             return 1
     except Exception as e:
-        # If user not participant, show join link
         if "USER_NOT_PARTICIPANT" in str(e) or "UserNotParticipant" in str(e):
             try:
                 link = await app.export_chat_invite_link(FORCE_SUB)
             except:
                 link = JOIN_LINK
-            
             caption = f"👋 **Welcome {message.from_user.first_name}!**\n\n⚠️ You must join our updates channel to use this bot."
             await message.reply_photo(
                 photo="https://graph.org/file/d44f024a08ded19452152.jpg",
@@ -35,8 +31,7 @@ async def subscribe(app, message):
                 ])
             )
             return 1
-        return 0 # Allow other errors (like bot not admin) to pass
-    
+        return 0 
     return 0
 
 @app.on_message(filters.command("start"))
@@ -51,7 +46,8 @@ async def start_handler(client, message):
         "**Usage:**\n"
         "🔹 Send `/dl <link>` for Video\n"
         "🔹 Send `/adl <link>` for Audio\n"
-        "🔹 Send `/batch` for bulk saving"
+        "🔹 Send `/batch` for bulk saving\n"
+        "🔹 Send `/clone` to copy channels"
     )
     
     buttons = InlineKeyboardMarkup([
@@ -72,12 +68,17 @@ async def set_commands(_, message):
         return
      
     await app.set_bot_commands([
-        BotCommand("start", "🚀 Start"),
+        BotCommand("start", "🚀 Start Bot"),
+        BotCommand("batch", "📦 Bulk Save"),
+        BotCommand("clone", "♻️ Clone Channel"),
         BotCommand("dl", "💀 Video Download"),
         BotCommand("adl", "🎵 Audio Download"),
-        BotCommand("batch", "📦 Bulk Save"),
-        BotCommand("login", "🔑 Login"),
+        BotCommand("login", "🔑 Login User"),
+        BotCommand("setbot", "🤖 Add Custom Bot"),
+        BotCommand("settings", "⚙️ Settings"),
+        BotCommand("plan", "🗓️ Premium Plans"),
         BotCommand("logout", "🚪 Logout"),
-        BotCommand("settings", "⚙️ Settings")
+        BotCommand("rembot", "❌ Remove Bot"),
+        BotCommand("cancel", "🚫 Cancel Task")
     ])
-    await message.reply("✅ Commands updated!")
+    await message.reply("✅ Commands updated successfully!")

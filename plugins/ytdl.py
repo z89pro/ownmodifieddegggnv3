@@ -321,7 +321,51 @@ def progress_callback(done, total, user_id):
  
     return final
  
-async def process_video(client, event, url, cookies_env_var, check_duration_and_size=False):
+
+from telethon import Button
+import re
+
+# ... (existing imports)
+
+pending_selection = {}
+
+# ... (existing code)
+
+@client.on(events.CallbackQuery(pattern=b"^ytdl:"))
+async def ytdl_callback(event):
+    user_id = event.sender_id
+    data = event.data.decode('utf-8')
+    _, type, value = data.split(':')
+
+    if user_id not in pending_selection:
+        await event.answer("Session expired. Please send the link again.", alert=True)
+        return
+
+    url = pending_selection[user_id]
+    
+    if type == "cancel":
+        del pending_selection[user_id]
+        await event.delete()
+        return
+
+    await event.delete()
+    
+    # Set cookies if needed
+    cookies_env_var = YT_COOKIES
+    
+    if type == "audio":
+        await process_audio(client, event, url, cookies_env_var)
+    elif type == "video":
+        # value is format_id
+        await process_video_download(client, event, url, cookies_env_var, format_id=value)
+    
+    if user_id in pending_selection:
+        del pending_selection[user_id]
+
+
+async def process_video_download(client, event, url, cookies_env_var, format_id=None):
+    # This is the actual download logic, moved from process_video
+    # ... (logic to download using specific format_id if provided)
     start_time = time.time()
     logger.info(f"Received link: {url}")
      
@@ -346,10 +390,12 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
     thumbnail_file = None
     metadata = {'width': None, 'height': None, 'duration': None, 'thumbnail': None}
  
-     
+    # If format_id is provided, use it. Otherwise use 'best'.
+    format_str = f"{format_id}+bestaudio/best" if format_id else 'best'
+
     ydl_opts = {
         'outtmpl': download_path,
-        'format': 'best',
+        'format': format_str,
         'cookiefile': temp_cookie_path if temp_cookie_path else None,
         'writethumbnail': True,
         'verbose': True,
@@ -363,10 +409,21 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
         }
     }
     prog = None
-    progress_message = await event.reply("**__Starting download...__**")
+    # If event is a CallbackQuery, we can't reply directly with a new message object in the same way as NewMessage
+    # But we deleted the callback message, so we can send a new one.
+    # Or if it's from process_video (direct call), event is NewMessage.
+    
+    # We'll just use client.send_message or event.respond
+    if hasattr(event, 'reply'):
+        progress_message = await event.reply("**__Starting download...__**")
+    else:
+        progress_message = await client.send_message(event.chat_id, "**__Starting download...__**")
+        
     logger.info("Starting the download process...")
     try:
-        info_dict = await fetch_video_info(url, ydl_opts, progress_message, check_duration_and_size)
+        # We don't need to check duration/size again if we already did it in the selection phase, 
+        # but it doesn't hurt to be safe.
+        info_dict = await fetch_video_info(url, ydl_opts, progress_message, check_duration_and_size=True)
         if not info_dict:
             return
          
@@ -393,7 +450,7 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
             THUMB = thumbnail_file
         else:
             THUMB = await screenshot(download_path, metadata['duration'], event.sender_id)
-
+ 
         chat_id = event.chat_id
         SIZE = 2 * 1024 * 1024
         caption = f"{title}"
@@ -428,10 +485,10 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
             if prog:
                 await prog.delete()
         else:
-            await event.reply("**__File not found after download. Something went wrong!__**")
+            await client.send_message(chat_id, "**__File not found after download. Something went wrong!__**")
     except yt_dlp.utils.DownloadError as e:
         if "instagram.com" in url and ("login" in str(e).lower() or "rate-limit" in str(e).lower()):
-             await event.reply("**⚠️ yt-dlp failed, trying Instaloader...**")
+             await client.send_message(chat_id, "**⚠️ yt-dlp failed, trying Instaloader...**")
              from utils.instaloader_helper import download_instagram_post
              target_dir = f"insta_{event.sender_id}"
              file_path = await asyncio.to_thread(download_instagram_post, url, target_dir)
@@ -442,15 +499,15 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
                  shutil.rmtree(target_dir, ignore_errors=True)
                  return
              else:
-                 await event.reply("**❌ Instaloader also failed. Please check the link or try again later.**")
+                 await client.send_message(chat_id, "**❌ Instaloader also failed. Please check the link or try again later.**")
 
         elif "Sign in to confirm" in str(e) or "cookies" in str(e).lower():
-            await event.reply("**❌ YouTube Error: Authentication Failed**\n\nYouTube requires you to sign in. This means your `YT_COOKIES` in Koyeb are missing, invalid, or expired.\n\n**How to Fix:**\n1. Export fresh cookies from your browser (Netscape format).\n2. Update the `YT_COOKIES` variable in Koyeb.\n3. Redeploy.")
+            await client.send_message(chat_id, "**❌ YouTube Error: Authentication Failed**\n\nYouTube requires you to sign in. This means your `YT_COOKIES` in Koyeb are missing, invalid, or expired.\n\n**How to Fix:**\n1. Export fresh cookies from your browser (Netscape format).\n2. Update the `YT_COOKIES` variable in Koyeb.\n3. Redeploy.")
         else:
-            await event.reply(f"**__Download Error: {e}__**")
+            await client.send_message(chat_id, f"**__Download Error: {e}__**")
     except Exception as e:
         logger.exception("An error occurred during download or upload.")
-        await event.reply(f"**__An error occurred: {e}__**")
+        await client.send_message(chat_id, f"**__An error occurred: {e}__**")
     finally:
          
         if os.path.exists(download_path):
@@ -459,6 +516,94 @@ async def process_video(client, event, url, cookies_env_var, check_duration_and_
             os.remove(temp_cookie_path)
         if thumbnail_file and os.path.exists(thumbnail_file):
             os.remove(thumbnail_file)
+
+
+async def process_video(client, event, url, cookies_env_var, check_duration_and_size=False):
+    # Check if YouTube
+    if "youtube.com" in url or "youtu.be" in url:
+        pending_selection[event.sender_id] = url
+        
+        msg = await event.reply("**__Fetching available formats...__**")
+        
+        # Fetch formats
+        ydl_opts = {
+            'cookiefile': None, # We'll handle cookies later or use temp file if needed for extraction too? 
+                                # Ideally we should use cookies for extraction too to see premium formats.
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        # Use cookies for extraction if available
+        temp_cookie_path = None
+        if cookies_env_var:
+             with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
+                temp_cookie_file.write(cookies_env_var)
+                temp_cookie_path = temp_cookie_file.name
+             ydl_opts['cookiefile'] = temp_cookie_path
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.to_thread(ydl.extract_info, url, download=False)
+            
+            formats = info.get('formats', [])
+            available_resolutions = set()
+            
+            # Filter formats
+            for f in formats:
+                if f.get('vcodec') != 'none' and f.get('height'):
+                    available_resolutions.add(f['height'])
+            
+            buttons = []
+            row = []
+            sorted_resolutions = sorted(list(available_resolutions))
+            
+            # Common resolutions we want to show
+            target_resolutions = [240, 360, 480, 720, 1080, 1440, 2160]
+            
+            for res in target_resolutions:
+                if res in sorted_resolutions:
+                    # Find the best format ID for this resolution (usually we just pass height to yt-dlp selector, 
+                    # but here we want to be specific or just pass height constraint)
+                    # Actually, passing format_id is safer if we picked one, but yt-dlp 'bestvideo[height=X]+bestaudio' is easier.
+                    # Let's pass the height as value and construct selector later.
+                    # Wait, the user wants "240, 480, etc".
+                    # Let's pass the resolution as value.
+                    
+                    # We need to find the format_id corresponding to this resolution to be precise, 
+                    # or we can use `bestvideo[height=X]+bestaudio`.
+                    # Let's use `bestvideo[height={res}]+bestaudio/best[height={res}]`
+                    
+                    # But wait, `format_id` in `process_video_download` expects a string format selector.
+                    selector = f"bestvideo[height={res}]+bestaudio/best[height={res}]"
+                    row.append(Button.inline(f"{res}p", data=f"ytdl:video:{selector}"))
+                    
+                    if len(row) == 3:
+                        buttons.append(row)
+                        row = []
+            
+            if row:
+                buttons.append(row)
+                
+            # Add Audio Only option
+            buttons.append([Button.inline("🎵 Audio Only", data="ytdl:audio:best")])
+            buttons.append([Button.inline("❌ Cancel", data="ytdl:cancel:none")])
+            
+            await msg.edit("**Select Quality:**", buttons=buttons)
+            
+        except Exception as e:
+            logger.error(f"Error fetching formats: {e}")
+            await msg.edit(f"**Error fetching formats:** {e}")
+            # Fallback to default download if extraction fails?
+            # await process_video_download(client, event, url, cookies_env_var)
+            
+        finally:
+            if temp_cookie_path and os.path.exists(temp_cookie_path):
+                os.remove(temp_cookie_path)
+                
+    else:
+        # Not YouTube (e.g. Instagram), auto download best quality
+        await process_video_download(client, event, url, cookies_env_var)
+
  
 
 async def split_and_upload_file(app, sender, file_path, caption):
@@ -468,7 +613,7 @@ async def split_and_upload_file(app, sender, file_path, caption):
 
     file_size = os.path.getsize(file_path)
     start = await app.send_message(sender, f"ℹ️ File size: {file_size / (1024 * 1024):.2f} MB")
-    PART_SIZE =  1.9 * 1024 * 1024 * 1024
+    PART_SIZE = int(1.9 * 1024 * 1024 * 1024)
 
     part_number = 0
     async with aiofiles.open(file_path, mode="rb") as f:

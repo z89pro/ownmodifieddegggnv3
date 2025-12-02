@@ -9,8 +9,8 @@ load_dotenv()
 # ░ CONFIGURATION SETTINGS
 # ════════════════════════════════════════════════════════════════════════════════
 
-# 1. Instagram Cookies
-INST_COOKIES = os.getenv("INST_COOKIES", "")
+# 1. Instagram Cookies (Variable name fixed to INSTA_COOKIES)
+INSTA_COOKIES = os.getenv("INSTA_COOKIES", "")
 
 # 2. YouTube Cookies
 YT_COOKIES = os.getenv("YT_COOKIES", "")
@@ -47,6 +47,7 @@ PREMIUM_LIMIT  = int(os.getenv("PREMIUM_LIMIT", "500"))
 # ─── UI / LINKS ─────────────────────────────────────────────────────────────────
 JOIN_LINK     = os.getenv("JOIN_LINK", "https://t.me/team_spy_pro")
 ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "https://t.me/username_of_admin")
+
 # Proxy Support
 HTTP_PROXY = os.getenv("HTTP_PROXY", None)
 

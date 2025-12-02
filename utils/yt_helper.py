@@ -1,10 +1,10 @@
 """
 Enhanced YT-DLP Download Helper with Browser Cookie Support
-Author: Gagan (Enhanced with AI for Production)
+Author: Gagan (Enhanced by Master Coder for Anti-Bot Evasion)
 Features:
+- Fixed User-Agent Mismatch (Android Client Enforcement)
 - Browser cookie auto-extraction
 - Retry logic with exponential backoff
-- Better error handling and user messages
 - Rate limit prevention
 """
 
@@ -21,6 +21,12 @@ from telethon import events, Button
 from shared_client import client
 from shared_client import app  # Pyrogram app
 from config import YT_COOKIES, INSTA_COOKIES
+# Agar config mein proxy hai toh wahan se import karo, warna None
+try:
+    from config import HTTP_PROXY
+except ImportError:
+    HTTP_PROXY = None
+
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
 from utils.func import fast_upload, progress_callback, get_video_metadata, screenshot, d_thumbnail, get_random_string
@@ -70,6 +76,11 @@ class CookieManager:
             return None
         
         try:
+            # Netscape format check
+            if not cookies_text.strip().startswith("# Netscape"):
+                 # Agar user ne galti se header nahi lagaya, toh hum laga dete hain
+                 cookies_text = "# Netscape HTTP Cookie File\n" + cookies_text
+
             temp_file = tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt')
             temp_file.write(cookies_text)
             temp_file.close()
@@ -80,30 +91,18 @@ class CookieManager:
 
 def get_ydl_opts(url: str, cookies_env_var: Optional[str] = None, format_spec: str = 'best') -> Dict[str, Any]:
     """
-    Get yt-dlp options with enhanced settings
-    
-    Args:
-        url: URL to download
-        cookies_env_var: Cookie string from environment
-        format_spec: Format specification
-    
-    Returns:
-        Dictionary of yt-dlp options
+    Get yt-dlp options with enhanced settings and Anti-Detection
     """
     opts = {
         'quiet': False,
         'no_warnings': False,
         'format': format_spec,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
-        },
+        # 'http_headers' REMOVED: Preventing User-Agent mismatch
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web', 'ios'],  # Multiple clients for better compatibility
-                'skip': ['dash', 'hls'],  # Skip if issues occur
+                # Forces pure Android API usage which is more lenient on Data Centers
+                'player_client': ['android'],
+                'skip': ['dash', 'hls'],
             },
             'instagram': {
                 'api_version': '1',
@@ -113,15 +112,20 @@ def get_ydl_opts(url: str, cookies_env_var: Optional[str] = None, format_spec: s
         'fragment_retries': 10,
         'socket_timeout': 30,
     }
+
+    # Add Proxy if available in config
+    if HTTP_PROXY:
+        opts['proxy'] = HTTP_PROXY
     
-    # Try browser cookies first
+    # Cookie Handling
     if "youtube.com" in url or "youtu.be" in url or "instagram.com" in url:
+        # 1. Try Browser (Localhost only)
         browser = CookieManager.try_browser_cookies(url)
         if browser:
             opts['cookiesfrombrowser'] = (browser,)
             logger.info(f"Using browser cookies from {browser}")
+        # 2. Fallback to ENV/Config Cookies (Server/Cloud)
         elif cookies_env_var:
-            # Fallback to environment cookies
             cookie_file = CookieManager.create_cookie_file(cookies_env_var)
             if cookie_file:
                 opts['cookiefile'] = cookie_file
@@ -132,15 +136,6 @@ def get_ydl_opts(url: str, cookies_env_var: Optional[str] = None, format_spec: s
 async def download_with_retry(url: str, ydl_opts: Dict[str, Any], progress_message, max_retries: int = MAX_RETRIES) -> Optional[Dict]:
     """
     Download with retry logic and exponential backoff
-    
-    Args:
-        url: URL to download
-        ydl_opts: yt-dlp options
-        progress_message: Message to update
-        max_retries: Maximum retry attempts
-    
-    Returns:
-        Info dict if successful, None otherwise
     """
     for attempt in range(max_retries):
         try:
@@ -153,12 +148,11 @@ async def download_with_retry(url: str, ydl_opts: Dict[str, Any], progress_messa
             # Check for specific error types
             if "sign in" in error_msg or "login" in error_msg:
                 await progress_message.edit(
-                    "**❌ Authentication Required**\\n\\n"
-                    "This content requires login.\\n\\n"
-                    "**Solutions:**\\n"
-                    "1. Make sure you're logged into YouTube/Instagram in Chrome\\n"
-                    "2. Update `YT_COOKIES` or `INSTA_COOKIES` environment variable\\n"
-                    "3. Try again in a few minutes"
+                    "**❌ Authentication Required**\n\n"
+                    "YouTube is asking for Login. This usually means:\n"
+                    "1. Your Server IP is flagged.\n"
+                    "2. Cookies are expired.\n\n"
+                    "**Fix:** Update `YT_COOKIES` with fresh exported cookies."
                 )
                 return None
             elif "rate" in error_msg or "too many requests" in error_msg:
@@ -169,14 +163,14 @@ async def download_with_retry(url: str, ydl_opts: Dict[str, Any], progress_messa
                     continue
                 else:
                     await progress_message.edit(
-                        "**❌ Rate Limit Exceeded**\\n\\n"
-                        f"Failed after {max_retries} attempts.\\n"
-                        "Please wait a few minutes and try again."
+                        "**❌ Rate Limit Exceeded**\n\n"
+                        f"Failed after {max_retries} attempts.\n"
+                        "Server IP is likely blocked for now."
                     )
                     return None
             elif "private" in error_msg or "not available" in error_msg:
                 await progress_message.edit(
-                    "**❌ Content Not Available**\\n\\n"
+                    "**❌ Content Not Available**\n\n"
                     "This content is private, deleted, or geo-restricted."
                 )
                 return None
@@ -187,11 +181,11 @@ async def download_with_retry(url: str, ydl_opts: Dict[str, Any], progress_messa
                     await asyncio.sleep(RETRY_DELAY)
                     continue
                 else:
-                    await progress_message.edit(f"**❌ Download Failed**\\n\\n`{str(e)[:200]}`")
+                    await progress_message.edit(f"**❌ Download Failed**\n\n`{str(e)[:200]}`")
                     return None
         except Exception as e:
             logger.exception("Unexpected error during download")
-            await progress_message.edit(f"**❌ Unexpected Error**\\n\\n`{str(e)[:200]}`")
+            await progress_message.edit(f"**❌ Unexpected Error**\n\n`{str(e)[:200]}`")
             return None
     
     return None
@@ -207,10 +201,12 @@ async def download_thumbnail_async(url: str, path: str):
     """Download thumbnail asynchronously"""
     def download():
         import requests
-        response = requests.get(url, timeout=10)
-        with open(path, 'wb') as f:
-            f.write(response.content)
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                with open(path, 'wb') as f:
+                    f.write(response.content)
+        except Exception as e:
+            logger.error(f"Thumbnail download failed: {e}")
+            
     await asyncio.to_thread(download)
-
-# Import the rest of functions from original ytdl.py
-# (process_audio, process_video, handlers, etc. remain mostly the same but with enhanced error handling)

@@ -11,7 +11,7 @@ from shared_client import app
 from config import YT_COOKIES, INSTA_COOKIES
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
-from utils.func import fast_upload, progress_callback, get_video_metadata, screenshot, d_thumbnail, get_random_string
+from utils.func import get_video_metadata, screenshot, get_random_string
 from pyrogram.types import DocumentAttributeVideo
 from utils.message_manager import MessageManager
 from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER

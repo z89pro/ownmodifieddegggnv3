@@ -1,7 +1,7 @@
 
 
 import yt_dlp
-from yt_dlp.utils import sanitize_filename
+from yt_dlp.utils import sanitize_filename, DownloadError
 import os
 import time
 import asyncio
@@ -9,14 +9,20 @@ import tempfile
 import logging
 from telethon import events, Button
 from shared_client import client
+from shared_client import app
 from config import YT_COOKIES, INSTA_COOKIES
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
 from utils.func import fast_upload, progress_callback, get_video_metadata, screenshot, d_thumbnail, get_random_string
 from pyrogram.types import DocumentAttributeVideo
+from utils.message_manager import MessageManager
 
 logger = logging.getLogger(__name__)
 ongoing_downloads = {}
+
+# Enhanced configuration
+MAX_RETRIES = 3
+RETRY_DELAY = 5
 
 async def process_audio(client, event, url, cookies_env_var=None):
     cookies = None

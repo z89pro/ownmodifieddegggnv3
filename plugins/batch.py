@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional
 from utils.progress import batch_temp, progress_bar, humanbytes, TimeFormatter
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import MessageNotModified
+from utils.message_manager import MessageManager
 import math
 
 
@@ -508,15 +509,20 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
         
 @X.on_message(filters.command(['batch', 'single']))
 async def process_cmd(c, m):
+    # Auto-delete user command
+    MessageManager.delete_command(c, m)
+    
     uid = m.from_user.id
     cmd = m.command[0]
     
     if FREEMIUM_LIMIT == 0 and not await is_premium_user(uid):
-        await m.reply_text("This bot does not provide free servies, get subscription from OWNER")
+        msg = await m.reply_text("This bot does not provide free servies, get subscription from OWNER")
+        MessageManager.delete_error(c, msg)
         return
     
     if await sub(c, m) == 1: return
     pro = await m.reply_text('Doing some checks hold on...')
+    MessageManager.delete_status(c, pro)
     
     if is_user_active(uid):
         await pro.edit('You have an active task. Use /stop to cancel it.')
@@ -532,14 +538,20 @@ async def process_cmd(c, m):
 
 @X.on_message(filters.command(['cancel', 'stop']))
 async def cancel_cmd(c, m):
+    # Auto-delete user command
+    MessageManager.delete_command(c, m)
+    
     uid = m.from_user.id
     if is_user_active(uid):
         if await request_batch_cancel(uid):
-            await m.reply_text('Cancellation requested. The current batch will stop after the current download completes.')
+            msg = await m.reply_text('Cancellation requested. The current batch will stop after the current download completes.')
+            MessageManager.delete_success(c, msg)
         else:
-            await m.reply_text('Failed to request cancellation. Please try again.')
+            msg = await m.reply_text('Failed to request cancellation. Please try again.')
+            MessageManager.delete_error(c, msg)
     else:
-        await m.reply_text('No active batch process found.')
+        msg = await m.reply_text('No active batch process found.')
+        MessageManager.delete_error(c, msg)
 
 @X.on_message(filters.text & filters.private & ~login_in_progress & ~filters.command([
     'start', 'batch', 'cancel', 'login', 'logout', 'stop', 'set', 

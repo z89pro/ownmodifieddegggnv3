@@ -1,759 +1,276 @@
-
+# ---------------------------------------------------
+# File Name: ytdl.py
+# Description: Robust YouTube/Media Downloader with Cookie Support
+# ---------------------------------------------------
 
 import yt_dlp
-from yt_dlp.utils import sanitize_filename, DownloadError
 import os
+import tempfile
 import time
 import asyncio
-import tempfile
+import random
+import string
 import logging
-import glob
-from telethon import events, Button
-from shared_client import client
-from shared_client import app
-from config import YT_COOKIES, INSTA_COOKIES
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
-from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
-from utils.func import get_video_metadata, screenshot, progress_callback, fast_upload, d_thumbnail, get_random_string
-from utils.message_manager import MessageManager
-from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER
+import aiohttp 
+from concurrent.futures import ThreadPoolExecutor
 
-from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER
+# Import Config and Client
+from shared_client import client
+from telethon import events
+from telethon.tl.types import DocumentAttributeVideo
+from config import YT_COOKIES, INSTA_COOKIES
+from utils.func import fast_upload, progress_callback, get_video_metadata, screenshot
+from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
+from mutagen.mp3 import MP3
 
 logger = logging.getLogger(__name__)
+thread_pool = ThreadPoolExecutor()
 ongoing_downloads = {}
 
-# Import helper utilities
-try:
-    from utils.yt_helper import CookieManager, get_ydl_opts, download_with_retry
-    HELPER_AVAILABLE = True
-except ImportError:
-    logger.warning("yt_helper not available, using fallback methods")
-    HELPER_AVAILABLE = False
+def get_random_string(length=7):
+    characters = string.ascii_letters + string.digits
+    return ''.join(random.choice(characters) for _ in range(length)) 
 
-async def process_audio(client, event, url, cookies_env_var=None):
-    start_time = time.time()
-    
-    progress_message = await event.reply("**__Starting audio extraction...__**")
-
+async def download_thumbnail(url, path):
     try:
-        if HELPER_AVAILABLE:
-            # Use enhanced helper
-            ydl_opts = get_ydl_opts(url, cookies_env_var, format_spec='bestaudio/best')
-            ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
-            ydl_opts['outtmpl'] = f"%(title)s.%(ext)s"
-            
-            info_dict = await download_with_retry(url, ydl_opts, progress_message)
-            if not info_dict:
-                return
-        else:
-            # Fallback logic
-            cookies = None
-            if cookies_env_var:
-                cookies = cookies_env_var
-            
-            temp_cookie_path = None
-            if cookies:
-                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
-                    temp_cookie_file.write(cookies)
-                    temp_cookie_path = temp_cookie_file.name
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    with open(path, 'wb') as f:
+                        f.write(await resp.read())
+                    return path
+    except Exception as e:
+        logger.error(f"Thumbnail download failed: {e}")
+    return None
 
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': f"%(title)s.%(ext)s",
-                'cookiefile': temp_cookie_path,
-                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                'quiet': False,
-                'noplaylist': True,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info_dict = await asyncio.to_thread(ydl.extract_info, url, download=True)
-        
-        # Common processing
-        title = info_dict.get('title', 'Extracted Audio')
-        sanitized_title = sanitize_filename(title)
-        if len(sanitized_title) > 200:
-            sanitized_title = sanitized_title[:200]
-            
-        filename_base = sanitized_title
-        download_path = f"{filename_base}.mp3"
-        
-        # Rename if needed (yt-dlp might have named it differently based on title)
-        # But we used outtmpl with title, so it should be close.
-        # Let's find the file.
-        # Actually, info_dict['requested_downloads'][0]['filepath'] gives the path.
-        if 'requested_downloads' in info_dict:
-            download_path = info_dict['requested_downloads'][0]['filepath']
-        
-        # ... (rest of the logic)
-        
-        await progress_message.edit("**__Editing metadata...__**")
- 
-         
-        if os.path.exists(download_path):
-            def edit_metadata():
-                audio_file = MP3(download_path, ID3=ID3)
-                try:
-                    audio_file.add_tags()
-                except Exception:
-                    pass
-                audio_file.tags["TIT2"] = TIT2(encoding=3, text=title)
-                audio_file.tags["TPE1"] = TPE1(encoding=3, text="Team SPY")
-                audio_file.tags["COMM"] = COMM(encoding=3, lang="eng", desc="Comment", text="Processed by Team SPY")
- 
-                thumbnail_url = info_dict.get('thumbnail')
-                if thumbnail_url:
-                    thumbnail_path = os.path.join(tempfile.gettempdir(), "thumb.jpg")
-                    asyncio.run(download_thumbnail_async(thumbnail_url, thumbnail_path))
-                    with open(thumbnail_path, 'rb') as img:
-                        audio_file.tags["APIC"] = APIC(
-                            encoding=3, mime='image/jpeg', type=3, desc='Cover', data=img.read()
-                        )
-                    os.remove(thumbnail_path)
-                audio_file.save()
- 
-            await asyncio.to_thread(edit_metadata)
-
- 
-         
- 
-         
-        chat_id = event.chat_id
-        if os.path.exists(download_path):
-            await progress_message.delete()
-            prog = await client.send_message(chat_id, "**__Starting Upload...__**")
-            uploaded = await fast_upload(
-                client, download_path, 
-                reply=prog, 
-                name=None,
-                progress_bar_function=lambda done, total: progress_callback(done, total, chat_id)
-            )
-            await client.send_file(chat_id, uploaded, caption=f"**{title}**\n\n**__Powered by Team SPY__**")
-            if prog:
-                await prog.delete()
-        else:
-            await event.reply("**__Audio file not found after extraction!__**")
- 
-    except yt_dlp.utils.DownloadError as e:
-        if "Sign in to confirm" in str(e) or "cookies" in str(e).lower():
-            await event.reply("**❌ YouTube Error: Authentication Failed**\n\nYouTube requires you to sign in. This means your `YT_COOKIES` in Koyeb are missing, invalid, or expired.\n\n**How to Fix:**\n1. Export fresh cookies from your browser (Netscape format).\n2. Update the `YT_COOKIES` variable in Koyeb.\n3. Redeploy.")
-        else:
-            await event.reply(f"**__Download Error: {e}__**")
-    except Exception as e:
-        logger.exception("Error during audio extraction or upload")
-        await event.reply(f"**__An error occurred: {e}__**")
-    finally:
-        if os.path.exists(download_path):
-            os.remove(download_path)
-        if temp_cookie_path and os.path.exists(temp_cookie_path):
-            os.remove(temp_cookie_path)
- 
-@client.on(events.NewMessage(pattern="/adl"))
-async def handler(event):
-    user_id = event.sender_id
-    if user_id in ongoing_downloads:
-        await event.reply("**You already have an ongoing download. Please wait until it completes!**")
-        return
- 
-    if len(event.message.text.split()) < 2:
-        await event.reply("**Usage:** `/adl <video-link>`\n\nPlease provide a valid video link!")
-        return    
- 
-    url = event.message.text.split()[1]
-    ongoing_downloads[user_id] = True
- 
-    try:
-        if "instagram.com" in url:
-            await process_audio(client, event, url, cookies_env_var=INSTA_COOKIES)
-        elif "youtube.com" in url or "youtu.be" in url:
-            await process_audio(client, event, url, cookies_env_var=YT_COOKIES)
-        else:
-            await process_audio(client, event, url)
-    except Exception as e:
-        await event.reply(f"**An error occurred:** `{e}`")
-    finally:
-        ongoing_downloads.pop(user_id, None)
- 
- 
-async def fetch_video_info(url, ydl_opts, progress_message, check_duration_and_size):
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=False)
- 
-        if check_duration_and_size:
-             
-            duration = info_dict.get('duration', 0)
-            if duration and duration > 3 * 3600:   
-                await progress_message.edit("**❌ __Video is longer than 3 hours. Download aborted...__**")
-                return None
- 
-             
-            estimated_size = info_dict.get('filesize_approx', 0)
-            if estimated_size and estimated_size > 2 * 1024 * 1024 * 1024:   
-                await progress_message.edit("**🤞 __Video size is larger than 2GB. Aborting download.__**")
-                return None
- 
-        return info_dict
- 
-def download_video(url, ydl_opts):
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
- 
- 
-@client.on(events.NewMessage(pattern="/dl"))
-async def handler(event):
-    user_id = event.sender_id
- 
-     
-    if user_id in ongoing_downloads:
-        await event.reply("**You already have an ongoing ytdlp download. Please wait until it completes!**")
-        return
- 
-    if len(event.message.text.split()) < 2:
-        await event.reply("**Usage:** `/dl <video-link>`\n\nPlease provide a valid video link!")
-        return    
- 
-    url = event.message.text.split()[1]
- 
-     
-    try:
-        if "instagram.com" in url:
-            await process_video(client, event, url, INSTA_COOKIES, check_duration_and_size=False)
-        elif "youtube.com" in url or "youtu.be" in url:
-            await process_video(client, event, url, YT_COOKIES, check_duration_and_size=True)
-        else:
-            await process_video(client, event, url, None, check_duration_and_size=False)
- 
-    except Exception as e:
-        await event.reply(f"**An error occurred:** `{e}`")
-    finally:
-         
-        ongoing_downloads.pop(user_id, None)
-user_progress = {}
- 
-def progress_callback(done, total, user_id):
-     
-    if user_id not in user_progress:
-        user_progress[user_id] = {
-            'previous_done': 0,
-            'previous_time': time.time()
-        }
- 
-     
-    user_data = user_progress[user_id]
- 
-     
-    percent = (done / total) * 100
- 
-     
-    completed_blocks = int(percent // 10)
-    remaining_blocks = 10 - completed_blocks
-    progress_bar = "♦" * completed_blocks + "◇" * remaining_blocks
- 
-     
-    done_mb = done / (1024 * 1024)   
-    total_mb = total / (1024 * 1024)
- 
-     
-    speed = done - user_data['previous_done']
-    elapsed_time = time.time() - user_data['previous_time']
- 
-    if elapsed_time > 0:
-        speed_bps = speed / elapsed_time   
-        speed_mbps = (speed_bps * 8) / (1024 * 1024)   
-    else:
-        speed_mbps = 0
- 
-     
-    if speed_bps > 0:
-        remaining_time = (total - done) / speed_bps
-    else:
-        remaining_time = 0
- 
-     
-    remaining_time_min = remaining_time / 60
- 
-     
-    final = (
-        f"╭──────────────────╮\n"
-        f"│        **__Uploading...__**       \n"
-        f"├──────────\n"
-        f"│ {progress_bar}\n\n"
-        f"│ **__Progress:__** {percent:.2f}%\n"
-        f"│ **__Done:__** {done_mb:.2f} MB / {total_mb:.2f} MB\n"
-        f"│ **__Speed:__** {speed_mbps:.2f} Mbps\n"
-        f"│ **__Time Remaining:__** {remaining_time_min:.2f} min\n"
-        f"╰──────────────────╯\n\n"
-        f"**__Powered by Team SPY__**"
+async def extract_info_async(ydl, url, download=True):
+    return await asyncio.get_event_loop().run_in_executor(
+        thread_pool, 
+        lambda: ydl.extract_info(url, download=download)
     )
- 
-     
-    user_data['previous_done'] = done
-    user_data['previous_time'] = time.time()
- 
-    return final
- 
 
-from telethon import Button
-import re
+# ─── AUDIO DOWNLOADER ──────────────────────────────────────────────────────────
 
-# ... (existing imports)
-
-pending_selection = {}
-
-# ... (existing code)
-
-@client.on(events.CallbackQuery(pattern=b"^ytdl:"))
-async def ytdl_callback(event):
+async def process_audio(client, event, url, cookies_content=None):
     user_id = event.sender_id
-    data = event.data.decode('utf-8')
-    _, type, value = data.split(':')
-
-    if user_id not in pending_selection:
-        await event.answer("Session expired. Please send the link again.", alert=True)
-        return
-
-    url = pending_selection[user_id]
+    temp_cookie_path = None
     
-    if type == "cancel":
-        del pending_selection[user_id]
-        await event.delete()
-        return
+    # Create temp cookie file if content exists
+    if cookies_content:
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as f:
+                f.write(cookies_content)
+                temp_cookie_path = f.name
+        except Exception as e:
+            logger.error(f"Cookie write error: {e}")
 
-    await event.delete()
+    random_id = get_random_string()
+    output_template = f"audio_{user_id}_{random_id}.%(ext)s"
     
-    # Set cookies if needed
-    cookies_env_var = YT_COOKIES
-    
-    if type == "audio":
-        await process_audio(client, event, url, cookies_env_var)
-    elif type == "video":
-        # value is format_id
-        await process_video_download(client, event, url, cookies_env_var, format_id=value)
-    
-    if user_id in pending_selection:
-        del pending_selection[user_id]
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_template,
+        'cookiefile': temp_cookie_path,
+        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+        'quiet': False,
+        'noplaylist': True,
+    }
 
-
-async def process_video_download(client, event, url, cookies_env_var, format_id=None):
-    # This is the actual download logic, moved from process_video
-    # ... (logic to download using specific format_id if provided)
-    start_time = time.time()
-    logger.info(f"Received link: {url}")
-    
-    # We'll just use client.send_message or event.respond
-    if hasattr(event, 'reply'):
-        progress_message = await event.reply("**__Starting download...__**")
-    else:
-        progress_message = await client.send_message(event.chat_id, "**__Starting download...__**")
-        
-    logger.info("Starting the download process...")
+    msg = await event.reply("🎵 **Downloading Audio...**")
 
     try:
-        if HELPER_AVAILABLE:
-             # Use enhanced helper
-            format_str = f"{format_id}+bestaudio/best" if format_id else 'best'
-            ydl_opts = get_ydl_opts(url, cookies_env_var, format_spec=format_str)
-            ydl_opts['writethumbnail'] = True
-            ydl_opts['outtmpl'] = "%(title)s.%(ext)s"
-            
-            info_dict = await download_with_retry(url, ydl_opts, progress_message)
-            if not info_dict:
-                return
-        else:
-            # Fallback logic
-            cookies = None
-            if cookies_env_var:
-                cookies = cookies_env_var
-
-            temp_cookie_path = None
-            if cookies:
-                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
-                    temp_cookie_file.write(cookies)
-                    temp_cookie_path = temp_cookie_file.name
-                logger.info(f"Created temporary cookie file at: {temp_cookie_path}")
-            
-            # Fetch info first to get title
-            ydl_opts_info = {
-                'quiet': True,
-                'no_warnings': True,
-                'cookiefile': temp_cookie_path if temp_cookie_path else None,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-                info_dict = await asyncio.to_thread(ydl.extract_info, url, download=False)
-                
-            if not info_dict:
-                return
-
-            title = info_dict.get('title', 'Video')
-            sanitized_title = sanitize_filename(title)
-            if len(sanitized_title) > 200:
-                sanitized_title = sanitized_title[:200]
-                
-            ext = info_dict.get('ext', 'mp4')
-            filename = f"{sanitized_title}.{ext}"
-            download_path = os.path.abspath(filename)
-            
-            format_str = f"{format_id}+bestaudio/best" if format_id else 'best'
-            
-            ydl_opts = {
-                'outtmpl': download_path,
-                'format': format_str,
-                'cookiefile': temp_cookie_path if temp_cookie_path else None,
-                'writethumbnail': True,
-                'verbose': True,
-            }
-            
-            await asyncio.to_thread(download_video, url, ydl_opts)
-
-        # Common processing
-        if 'requested_downloads' in info_dict:
-            download_path = info_dict['requested_downloads'][0]['filepath']
-        elif not HELPER_AVAILABLE:
-             # Fallback path logic
-             pass
-        else:
-             # Helper should have returned info_dict with requested_downloads
-             # If not, maybe it wasn't a download?
-             pass
-             
-        # Check duration/size limits if needed (can be added to yt_helper or checked here)
-        duration = info_dict.get('duration', 0)
-        if duration and duration > 3 * 3600:   
-            await progress_message.edit("**❌ __Video is longer than 3 hours. Download aborted...__**")
-            return
-            
-        estimated_size = info_dict.get('filesize_approx', 0)
-        if estimated_size and estimated_size > 2 * 1024 * 1024 * 1024:   
-             await progress_message.edit("**🤞 __Video size is larger than 2GB. Aborting download.__**")
-             return
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = await extract_info_async(ydl, url, download=True)
         
-        # Update metadata from info_dict
-        title = info_dict.get('title', 'Powered by Team SPY')
-        k = await get_video_metadata(download_path)      
-        W = k['width']
-        H = k['height']
-        D = k['duration']
-        metadata['width'] = info_dict.get('width') or W
-        metadata['height'] = info_dict.get('height') or H
-        metadata['duration'] = int(info_dict.get('duration') or 0) or D
-        thumbnail_url = info_dict.get('thumbnail', None)
-        THUMB = None
+        # Determine filename
+        if 'requested_downloads' in info_dict:
+            file_path = info_dict['requested_downloads'][0]['filepath']
+        else:
+            # Fallback guess
+            file_path = output_template.replace("%(ext)s", "mp3")
 
- 
-         
-        if thumbnail_url:
-            thumbnail_file = os.path.join(tempfile.gettempdir(), get_random_string() + ".jpg")
-            downloaded_thumb = d_thumbnail(thumbnail_url, thumbnail_file)
-            if downloaded_thumb:
-                logger.info(f"Thumbnail saved at: {downloaded_thumb}")
- 
-        if thumbnail_file:
-            THUMB = thumbnail_file
-        else:
-            THUMB = await screenshot(download_path, metadata['duration'], event.sender_id)
- 
-        chat_id = event.chat_id
-        SIZE = 2 * 1024 * 1024
-        caption = f"{title}"
-     
-        if os.path.exists(download_path) and os.path.getsize(download_path) > SIZE:
-            prog = await client.send_message(chat_id, "**__Starting Upload...__**")
-            await split_and_upload_file(app, chat_id, download_path, caption)
-            await prog.delete()
-         
-        if os.path.exists(download_path):
-            await progress_message.delete()
-            prog = await client.send_message(chat_id, "**__Starting Upload...__**")
-            uploaded = await fast_upload(
-                client, download_path,
-                reply=prog,
-                progress_bar_function=lambda done, total: progress_callback(done, total, chat_id)
-            )
-            await client.send_file(
-                event.chat_id,
-                uploaded,
-                caption=f"**{title}**",
-                attributes=[
-                    DocumentAttributeVideo(
-                        duration=metadata['duration'],
-                        w=metadata['width'],
-                        h=metadata['height'],
-                        supports_streaming=True
-                    )
-                ],
-                thumb=THUMB if THUMB else None
-            )
-            if prog:
-                await prog.delete()
-        else:
-            await client.send_message(chat_id, "**__File not found after download. Something went wrong!__**")
-    except yt_dlp.utils.DownloadError as e:
-        if "instagram.com" in url and ("login" in str(e).lower() or "rate-limit" in str(e).lower()):
-             await client.send_message(chat_id, "**⚠️ yt-dlp failed, trying Instaloader...**")
-             from utils.instaloader_helper import download_instagram_post
-             target_dir = f"insta_{event.sender_id}"
-             file_path = await asyncio.to_thread(download_instagram_post, url, target_dir)
-             
-             if file_path:
-                 await client.send_file(event.chat_id, file_path, caption="**Downloaded via Instaloader**")
-                 import shutil
-                 shutil.rmtree(target_dir, ignore_errors=True)
-                 return
-             else:
-                 await client.send_message(chat_id, "**❌ Instaloader also failed. Please check the link or try again later.**")
+        if not os.path.exists(file_path):
+            # Try finding any mp3 with that prefix
+            import glob
+            files = glob.glob(f"audio_{user_id}_{random_id}*.mp3")
+            if files:
+                file_path = files[0]
+            else:
+                await msg.edit("❌ Download failed: File not found.")
+                return
 
-        elif "Sign in to confirm" in str(e) or "cookies" in str(e).lower():
-            await client.send_message(chat_id, "**❌ YouTube Error: Authentication Failed**\n\nYouTube requires you to sign in. This means your `YT_COOKIES` in Koyeb are missing, invalid, or expired.\n\n**How to Fix:**\n1. Export fresh cookies from your browser (Netscape format).\n2. Update the `YT_COOKIES` variable in Koyeb.\n3. Redeploy.")
-        else:
-            await client.send_message(chat_id, f"**__Download Error: {e}__**")
+        # Metadata
+        title = info_dict.get('title', 'Audio')
+        await msg.edit("🏷️ **Adding Metadata...**")
+        
+        try:
+            audio = MP3(file_path, ID3=ID3)
+            try:
+                audio.add_tags()
+            except: 
+                pass
+            audio.tags.add(TIT2(encoding=3, text=title))
+            audio.tags.add(TPE1(encoding=3, text="Team SPY Bot"))
+            audio.save()
+        except Exception as e:
+            logger.warning(f"Metadata error: {e}")
+
+        # Upload
+        await msg.edit("⬆️ **Uploading...**")
+        uploaded = await fast_upload(
+            client, file_path, 
+            reply=msg, 
+            progress_bar_function=lambda d, t: progress_callback(d, t, user_id)
+        )
+        
+        await client.send_file(
+            event.chat_id, 
+            uploaded, 
+            caption=f"🎧 **{title}**\n\nby Team SPY"
+        )
+        await msg.delete()
+
     except Exception as e:
-        logger.exception("An error occurred during download or upload.")
-        await client.send_message(chat_id, f"**__An error occurred: {e}__**")
+        await msg.edit(f"❌ **Error:** `{str(e)[:200]}`")
+        logger.error(f"Audio Error: {e}")
     finally:
-         
-        if os.path.exists(download_path):
-            os.remove(download_path)
         if temp_cookie_path and os.path.exists(temp_cookie_path):
             os.remove(temp_cookie_path)
-        if thumbnail_file and os.path.exists(thumbnail_file):
-            os.remove(thumbnail_file)
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
 
-
-async def process_video(client, event, url, cookies_env_var, check_duration_and_size=False):
-    # Check if YouTube
-    if "youtube.com" in url or "youtu.be" in url:
-        pending_selection[event.sender_id] = url
-        
-        if cookies_env_var:
-            logger.info(f"Cookies found. Length: {len(cookies_env_var)}")
-        else:
-            logger.warning("No cookies found provided to process_video")
-
-        msg = await event.reply("**__Fetching available formats...__**")
-        
-        # Fetch formats
-        ydl_opts = {
-            'cookiefile': None, # We'll handle cookies later or use temp file if needed for extraction too? 
-                                # Ideally we should use cookies for extraction too to see premium formats.
-            'quiet': True,
-            'no_warnings': True,
-        }
-        
-        # Use cookies for extraction if available
-        temp_cookie_path = None
-        if cookies_env_var:
-             with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as temp_cookie_file:
-                temp_cookie_file.write(cookies_env_var)
-                temp_cookie_path = temp_cookie_file.name
-             ydl_opts['cookiefile'] = temp_cookie_path
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, url, download=False)
-            
-            formats = info.get('formats', [])
-            available_resolutions = set()
-            
-            # Filter formats
-            for f in formats:
-                if f.get('vcodec') != 'none' and f.get('height'):
-                    available_resolutions.add(f['height'])
-            
-            buttons = []
-            row = []
-            sorted_resolutions = sorted(list(available_resolutions))
-            
-            # Common resolutions we want to show
-            target_resolutions = [240, 360, 480, 720, 1080, 1440, 2160]
-            
-            for res in target_resolutions:
-                if res in sorted_resolutions:
-                    # Find the best format ID for this resolution (usually we just pass height to yt-dlp selector, 
-                    # but here we want to be specific or just pass height constraint)
-                    # Actually, passing format_id is safer if we picked one, but yt-dlp 'bestvideo[height=X]+bestaudio' is easier.
-                    # Let's pass the height as value and construct selector later.
-                    # Wait, the user wants "240, 480, etc".
-                    # Let's pass the resolution as value.
-                    
-                    # We need to find the format_id corresponding to this resolution to be precise, 
-                    # or we can use `bestvideo[height=X]+bestaudio`.
-                    # Let's use `bestvideo[height={res}]+bestaudio/best[height={res}]`
-                    
-                    # But wait, `format_id` in `process_video_download` expects a string format selector.
-                    selector = f"bestvideo[height={res}]+bestaudio/best[height={res}]"
-                    row.append(Button.inline(f"{res}p", data=f"ytdl:video:{selector}"))
-                    
-                    if len(row) == 3:
-                        buttons.append(row)
-                        row = []
-            
-            if row:
-                buttons.append(row)
-                
-            # Add Audio Only option
-            buttons.append([Button.inline("🎵 Audio Only", data="ytdl:audio:best")])
-            buttons.append([Button.inline("❌ Cancel", data="ytdl:cancel:none")])
-            
-            await msg.edit("**Select Quality:**", buttons=buttons)
-            
-        except Exception as e:
-            logger.error(f"Error fetching formats: {e}")
-            await msg.edit(f"**Error fetching formats:** {e}")
-            # Fallback to default download if extraction fails?
-            # await process_video_download(client, event, url, cookies_env_var)
-            
-        finally:
-            if temp_cookie_path and os.path.exists(temp_cookie_path):
-                os.remove(temp_cookie_path)
-                
-    else:
-        # Not YouTube (e.g. Instagram), auto download best quality
-        await process_video_download(client, event, url, cookies_env_var)
-
- 
-
-async def split_and_upload_file(app, sender, file_path, caption):
-    if not os.path.exists(file_path):
-        await app.send_message(sender, "❌ File not found!")
-        return
-
-    file_size = os.path.getsize(file_path)
-    start = await app.send_message(sender, f"ℹ️ File size: {file_size / (1024 * 1024):.2f} MB")
-    PART_SIZE = int(512 * 1024 * 1024) # 512 MB
-
-    part_number = 0
-    async with aiofiles.open(file_path, mode="rb") as f:
-        while True:
-            chunk = await f.read(PART_SIZE)
-            if not chunk:
-                break
-
-            # Create part filename
-            base_name, file_ext = os.path.splitext(file_path)
-            part_file = f"{base_name}.part{str(part_number).zfill(3)}{file_ext}"
-
-            # Write part to file
-            async with aiofiles.open(part_file, mode="wb") as part_f:
-                await part_f.write(chunk)
-
-            # Uploading part
-            edit = await app.send_message(sender, f"⬆️ Uploading part {part_number + 1}...")
-            part_caption = f"{caption} \n\n**Part : {part_number + 1}**"
-            await app.send_document(sender, document=part_file, caption=part_caption,
-                progress=progress_bar,
-                progress_args=("╭─────────────────────╮\n│      **__Pyro Uploader__**\n├─────────────────────", edit, time.time())
-            )
-            await edit.delete()
-            os.remove(part_file)
-
-            part_number += 1
-
-    await start.delete()
-    os.remove(file_path)
-
-
-PROGRESS_BAR = """
-│ **__Completed:__** {1}/{2}
-│ **__Bytes:__** {0}%
-│ **__Speed:__** {3}/s
-│ **__ETA:__** {4}
-╰─────────────────────╯
-"""
-
-async def get_seconds(time_string: str) -> int:
-    """
-    Converts a time string (e.g., '5min', '2hour') into seconds.
-    """
-    def extract_value_and_unit(ts: str):
-        value = ''.join(filter(str.isdigit, ts))
-        unit = ts[len(value):].strip()
-        return int(value) if value else 0, unit
+@client.on(events.NewMessage(pattern="/adl"))
+async def audio_handler(event):
+    if len(event.message.text.split()) < 2:
+        return await event.reply("Usage: `/adl <link>`")
     
-    value, unit = extract_value_and_unit(time_string)
-    time_units = {
-        's': 1,
-        'min': 60,
-        'hour': 3600,
-        'day': 86400,
-        'month': 86400 * 30,
-        'year': 86400 * 365
+    url = event.message.text.split()[1]
+    user_id = event.sender_id
+    
+    if user_id in ongoing_downloads:
+        return await event.reply("⚠️ Wait for current task to finish.")
+    
+    ongoing_downloads[user_id] = True
+    try:
+        cookies = INSTA_COOKIES if "instagram.com" in url else YT_COOKIES
+        await process_audio(client, event, url, cookies)
+    finally:
+        if user_id in ongoing_downloads:
+            del ongoing_downloads[user_id]
+
+# ─── VIDEO DOWNLOADER ──────────────────────────────────────────────────────────
+
+async def process_video(client, event, url, cookies_content=None):
+    user_id = event.sender_id
+    temp_cookie_path = None
+    
+    if cookies_content:
+        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.txt') as f:
+            f.write(cookies_content)
+            temp_cookie_path = f.name
+
+    random_id = get_random_string()
+    output_template = f"video_{user_id}_{random_id}.%(ext)s"
+    
+    ydl_opts = {
+        'format': 'bestvideo+bestaudio/best',
+        'outtmpl': output_template,
+        'cookiefile': temp_cookie_path,
+        'writethumbnail': True,
+        'quiet': False,
     }
-    
-    return value * time_units.get(unit, 0)
 
-async def progress_bar(current: int, total: int, ud_type: str, message, start: float):
-    """
-    Updates the progress bar for an ongoing process.
-    """
-    now = time.time()
-    diff = now - start
-    
-    if round(diff % 10) == 0 or current == total:
-        percentage = (current * 100) / total
-        speed = current / diff if diff else 0
-        elapsed_time = round(diff * 1000)
-        time_to_completion = round((total - current) / speed) * 1000 if speed else 0
-        estimated_total_time = elapsed_time + time_to_completion
+    msg = await event.reply("🎥 **Downloading Video...**")
 
-        elapsed_time_str = TimeFormatter(elapsed_time)
-        estimated_total_time_str = TimeFormatter(estimated_total_time)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = await extract_info_async(ydl, url, download=True)
 
-        progress = "".join(["♦" for _ in range(math.floor(percentage / 10))]) + \
-                   "".join(["◇" for _ in range(10 - math.floor(percentage / 10))])
+        # Find file
+        file_path = None
+        if 'requested_downloads' in info_dict:
+            file_path = info_dict['requested_downloads'][0]['filepath']
         
-        progress_text = progress + PROGRESS_BAR.format(
-            round(percentage, 2),
-            humanbytes(current),
-            humanbytes(total),
-            humanbytes(speed),
-            estimated_total_time_str if estimated_total_time_str else "0 s"
+        if not file_path or not os.path.exists(file_path):
+            # Fallback search
+            import glob
+            files = glob.glob(f"video_{user_id}_{random_id}*")
+            # Filter out non-video files like .jpg (thumbnails)
+            video_files = [f for f in files if not f.endswith(('.jpg', '.webp', '.png', '.txt'))]
+            if video_files:
+                file_path = video_files[0]
+            else:
+                await msg.edit("❌ Download failed: File not found.")
+                return
+
+        # Metadata extraction
+        title = info_dict.get('title', 'Video')
+        duration = info_dict.get('duration', 0)
+        width = info_dict.get('width', 0)
+        height = info_dict.get('height', 0)
+        
+        # Thumbnail
+        thumb_path = None
+        if info_dict.get('thumbnail'):
+            thumb_path = f"thumb_{user_id}_{random_id}.jpg"
+            await download_thumbnail(info_dict['thumbnail'], thumb_path)
+        
+        if not thumb_path:
+            thumb_path = await screenshot(file_path, duration, user_id)
+
+        # Upload
+        await msg.edit("⬆️ **Uploading...**")
+        uploaded = await fast_upload(
+            client, file_path,
+            reply=msg,
+            progress_bar_function=lambda d, t: progress_callback(d, t, user_id)
         )
-        try:
-            await message.edit(text=f"{ud_type}\n│ {progress_text}")
-        except:
-            pass
 
-def humanbytes(size: int) -> str:
-    """
-    Converts bytes into a human-readable format.
-    """
-    if not size:
-        return ""
-    
-    power = 2**10
-    units = ['B', 'KB', 'MB', 'GB', 'TB']
-    n = 0
-    while size > power and n < len(units) - 1:
-        size /= power
-        n += 1
-    
-    return f"{round(size, 2)} {units[n]}"
+        await client.send_file(
+            event.chat_id,
+            uploaded,
+            caption=f"🎥 **{title}**",
+            thumb=thumb_path,
+            attributes=[DocumentAttributeVideo(
+                duration=int(duration),
+                w=int(width),
+                h=int(height),
+                supports_streaming=True
+            )]
+        )
+        await msg.delete()
 
-def TimeFormatter(milliseconds: int) -> str:
-    """
-    Formats milliseconds into a human-readable duration.
-    """
-    seconds, milliseconds = divmod(milliseconds, 1000)
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
-    
-    parts = []
-    if days: parts.append(f"{days}d")
-    if hours: parts.append(f"{hours}h")
-    if minutes: parts.append(f"{minutes}m")
-    if seconds: parts.append(f"{seconds}s")
-    if milliseconds: parts.append(f"{milliseconds}ms")
-    
-    return ', '.join(parts)
+    except Exception as e:
+        err_msg = str(e)
+        if "Sign in" in err_msg:
+            await msg.edit("❌ **Cookie Error:** YouTube requires login. Update `YT_COOKIES` in config.")
+        else:
+            await msg.edit(f"❌ **Error:** `{err_msg[:200]}`")
+        logger.error(f"Video Error: {e}")
+    finally:
+        # Cleanup
+        if temp_cookie_path and os.path.exists(temp_cookie_path):
+            os.remove(temp_cookie_path)
+        if 'file_path' in locals() and file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        if 'thumb_path' in locals() and thumb_path and os.path.exists(thumb_path):
+            os.remove(thumb_path)
 
-def convert(seconds: int) -> str:
-    """
-    Converts seconds into HH:MM:SS format.
-    """
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{hours}:{minutes:02d}:{seconds:02d}"
+@client.on(events.NewMessage(pattern="/dl"))
+async def video_handler(event):
+    if len(event.message.text.split()) < 2:
+        return await event.reply("Usage: `/dl <link>`")
+    
+    url = event.message.text.split()[1]
+    user_id = event.sender_id
+    
+    if user_id in ongoing_downloads:
+        return await event.reply("⚠️ Wait for current task to finish.")
+    
+    ongoing_downloads[user_id] = True
+    try:
+        cookies = INSTA_COOKIES if "instagram.com" in url else YT_COOKIES
+        await process_video(client, event, url, cookies)
+    finally:
+        if user_id in ongoing_downloads:
+            del ongoing_downloads[user_id]

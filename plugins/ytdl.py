@@ -1,23 +1,22 @@
-# ---------------------------------------------------
-# File Name: ytdl.py (pure code)
-# Description: A Pyrogram bot for downloading yt and other sites videos from Telegram channels or groups 
-#              and uploading them back to Telegram.
-# Author: Gagan
-# GitHub: https://github.com/devgaganin/
-# Telegram: https://t.me/team_spy_pro
-# YouTube: https://youtube.com/@dev_gagan
-# Created: 2025-01-11
-# Last Modified: 2025-01-11
-# Version: 2.0.5
-# License: MIT License
-# ---------------------------------------------------
+
 
 import yt_dlp
 from yt_dlp.utils import sanitize_filename
 import os
-# ... (imports)
+import time
+import asyncio
+import tempfile
+import logging
+from telethon import events, Button
+from shared_client import client
+from config import YT_COOKIES, INSTA_COOKIES
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
+from utils.func import fast_upload, progress_callback, get_video_metadata, screenshot, d_thumbnail, get_random_string
+from pyrogram.types import DocumentAttributeVideo
 
-# ...
+logger = logging.getLogger(__name__)
+ongoing_downloads = {}
 
 async def process_audio(client, event, url, cookies_env_var=None):
     cookies = None

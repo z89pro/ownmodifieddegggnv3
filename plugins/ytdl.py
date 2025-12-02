@@ -1,5 +1,3 @@
-
-
 import yt_dlp
 from yt_dlp.utils import sanitize_filename, DownloadError
 import os
@@ -16,13 +14,18 @@ from mutagen.id3 import ID3, TIT2, TPE1, COMM, APIC
 from utils.func import fast_upload, progress_callback, get_video_metadata, screenshot, d_thumbnail, get_random_string
 from pyrogram.types import DocumentAttributeVideo
 from utils.message_manager import MessageManager
+from config import MAX_RETRIES, RETRY_DELAY, USE_BROWSER_COOKIES, COOKIE_BROWSER
 
 logger = logging.getLogger(__name__)
 ongoing_downloads = {}
 
-# Enhanced configuration
-MAX_RETRIES = 3
-RETRY_DELAY = 5
+# Import helper utilities
+try:
+    from utils.yt_helper import CookieManager, get_ydl_opts, download_with_retry
+    HELPER_AVAILABLE = True
+except ImportError:
+    logger.warning("yt_helper not available, using fallback methods")
+    HELPER_AVAILABLE = False
 
 async def process_audio(client, event, url, cookies_env_var=None):
     cookies = None

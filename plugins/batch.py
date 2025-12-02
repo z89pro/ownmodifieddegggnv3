@@ -492,7 +492,13 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
                                         progress=progress_bar, progress_args=p_args, 
                                         reply_to_message_id=rtmid)
             except Exception as e:
-                # await c.edit_message_text(d, p.id, f'Upload failed: {str(e)[:30]}')
+                # ------ FIXED SECTION: ERROR REPORTING ------
+                print(f"❌ Upload Failed: {e}") # Log error to console
+                try:
+                    await smsg.edit(f'❌ Upload Failed: {str(e)}') # Show error to user
+                except Exception:
+                    pass
+                # ---------------------------------------------
                 if os.path.exists(f): os.remove(f)
                 return 'Failed.'
             
@@ -562,7 +568,7 @@ async def text_handler(c, m):
     s = Z[uid].get('step')
     x = await get_ubot(uid)
     if not x:
-        await message.reply("Add your bot /setbot `token`")
+        await m.reply("Add your bot /setbot `token`") # Fixed 'message' to 'm'
         return
 
     if s == 'start':
@@ -699,5 +705,3 @@ async def text_handler(c, m):
             Z.pop(uid, None)
             unique_key = f"{uid}_BATCH"
             if unique_key in batch_temp.PROGRESS_DATA: del batch_temp.PROGRESS_DATA[unique_key]
-
-

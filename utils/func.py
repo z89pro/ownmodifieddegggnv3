@@ -339,3 +339,126 @@ async def get_premium_details(user_id):
     except Exception as e:
         logger.error(f"Error getting premium details for {user_id}: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------------
+# New functions added to support yt_helper.py
+# ---------------------------------------------------------------------------------
+
+import random
+import string
+import aiohttp
+from telethon.tl.types import DocumentAttributeVideo
+
+def get_random_string(length=10):
+    letters = string.ascii_lowercase
+    return ''.join(random.choice(letters) for i in range(length))
+
+async def d_thumbnail(url, path):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    with open(path, 'wb') as f:
+                        f.write(await resp.read())
+                    return path
+    except Exception as e:
+        logger.error(f"Error downloading thumbnail: {e}")
+    return None
+
+# Global progress tracker for progress_callback
+user_progress = {}
+
+def progress_callback(done, total, user_id):
+    if user_id not in user_progress:
+        user_progress[user_id] = {
+            'previous_done': 0,
+            'previous_time': time.time()
+        }
+
+    user_data = user_progress[user_id]
+    
+    if total == 0:
+        return "0%"
+
+    percent = (done / total) * 100
+    
+    # Create progress bar
+    completed_blocks = int(percent // 10)
+    remaining_blocks = 10 - completed_blocks
+    progress_bar = "♦" * completed_blocks + "◇" * remaining_blocks
+
+    done_mb = done / (1024 * 1024)
+    total_mb = total / (1024 * 1024)
+
+    speed = done - user_data['previous_done']
+    elapsed_time = time.time() - user_data['previous_time']
+
+    if elapsed_time > 0:
+        speed_bps = speed / elapsed_time
+        speed_mbps = (speed_bps * 8) / (1024 * 1024)
+    else:
+        speed_mbps = 0
+
+    if speed_bps > 0:
+        remaining_time = (total - done) / speed_bps
+    else:
+        remaining_time = 0
+
+    remaining_time_min = remaining_time / 60
+
+    final = (
+        f"╭──────────────────╮\n"
+        f"│        **__Uploading...__**       \n"
+        f"├──────────\n"
+        f"│ {progress_bar}\n\n"
+        f"│ **__Progress:__** {percent:.2f}%\n"
+        f"│ **__Done:__** {done_mb:.2f} MB / {total_mb:.2f} MB\n"
+        f"│ **__Speed:__** {speed_mbps:.2f} Mbps\n"
+        f"│ **__Time Remaining:__** {remaining_time_min:.2f} min\n"
+        f"╰──────────────────╯\n\n"
+        f"**__Powered by Team SPY__**"
+    )
+
+    user_data['previous_done'] = done
+    user_data['previous_time'] = time.time()
+
+    return final
+
+async def fast_upload(client, file_path, reply=None, name=None, progress_bar_function=None):
+    """
+    Uploads a file using Telethon's fast upload method.
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        # Use Telethon's upload_file
+        # Note: Telethon's upload_file doesn't natively support the exact callback signature 
+        # expected by progress_callback (done, total, user_id). 
+        # We need to wrap it.
+        
+        async def callback(current, total):
+            if progress_bar_function:
+                # Assuming progress_bar_function is a lambda that already has user_id bound
+                # or we need to pass it. 
+                # In ytdl.py it was: lambda done, total: progress_callback(done, total, chat_id)
+                # So here we just call it.
+                try:
+                    text = progress_bar_function(current, total)
+                    if reply and (current % (1024 * 1024 * 5) == 0 or current == total): # Update every 5MB or finish
+                         # Only edit if enough time passed to avoid flood wait?
+                         # For now just try/except
+                         await reply.edit(text)
+                except Exception:
+                    pass
+
+        file = await client.upload_file(
+            file_path,
+            file_name=name,
+            progress_callback=callback
+        )
+        return file
+    except Exception as e:
+        logger.error(f"Fast upload failed: {e}")
+        return None

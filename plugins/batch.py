@@ -20,6 +20,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQ
 from utils.message_manager import MessageManager
 import math
 
+# Shared Variables initialized here
 Y = None if not STRING else __import__('shared_client').userbot
 Z, P, UB, UC, emp = {}, {}, {}, {}, {}
 
@@ -300,7 +301,6 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
                 await send_direct(c, m, tcid, ft, rtmid)
                 return 'Sent directly.'
             
-            # --- STARTING DOWNLOAD ---
             c_name = f"{time.time()}"
             file_name = "File"
             if m.video:
@@ -334,7 +334,6 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
             fsize = os.path.getsize(f) / (1024 * 1024 * 1024)
             th = thumbnail(d)
             
-            # --- LARGE FILE HANDLING (4GB) ---
             if fsize > 2 and Y:
                 await upd_dlg(Y)
                 mtd = await get_video_metadata(f)
@@ -365,7 +364,6 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
                 os.remove(f)
                 return 'Done (Large file).'
             
-            # --- SPLITTING LOGIC (>1.95GB) ---
             if fsize > 1.95:
                 seven_z_cmd = None
                 for cmd in ['7z', '7zz']:
@@ -405,7 +403,6 @@ async def process_msg(c, u, m, d, lt, uid, i, smsg=None, batch_start_time=None, 
                     else:
                         print(f"7z Error: {stderr.decode()}")
                 
-            # --- NORMAL UPLOAD ---
             p_args = [c, smsg, time.time(), "UPLOADING", c_name, processed, total, batch_start_time, uid, task_type]
 
             try:

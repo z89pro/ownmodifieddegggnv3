@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 async def plan_command(client, message):
     text = (
         "💎 **PREMIUM PLANS** 💎\n\n"
-        "Choose a plan that suits you best to unlock stricted content saving and 4GB upload support!\n\n"
+        "Choose a plan that suits you best to unlock restricted content saving and 4GB upload support!\n\n"
         f"1️⃣ **{P0['d']['l']}**\n"
         f"   • Price: {P0['d']['s']} Stars\n"
         f"   • Validity: {P0['d']['du']} {P0['d']['u']}\n\n"
@@ -24,14 +24,12 @@ async def plan_command(client, message):
     
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Buy Now (/pay)", callback_data="pay_menu")],
-        [InlineKeyboardButton("🆘 Contact Admin", url="@zain")] 
+        [InlineKeyboardButton("🆘 Contact Admin", url="https://t.me/kingofpatal")] 
     ])
     
     await message.reply_text(text, reply_markup=buttons)
 
 @app.on_callback_query(filters.regex("^pay_menu"))
 async def pay_menu_handler(client, query):
-    # This just triggers the existing /pay logic (make sure pay.py handles this or user types /pay)
     await query.message.reply("Type /pay to proceed with payment!")
     await query.answer()
-  

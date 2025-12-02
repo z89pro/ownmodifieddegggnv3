@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Install system dependencies (FFmpeg, 7zip for splitting, build tools)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -15,15 +15,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Copy requirements and install
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -U -r requirements.txt
 
 # Copy all files
 COPY . .
 
-# Expose port for Web Support
+# Expose port
 EXPOSE 5000
 
-# Command to run Bot + Web Server
-CMD gunicorn -w 1 -b 0.0.0.0:5000 app:app & python3 main.py
+# Run with -u for unbuffered output to see errors in logs
+CMD gunicorn -w 1 -b 0.0.0.0:5000 app:app & python3 -u main.py

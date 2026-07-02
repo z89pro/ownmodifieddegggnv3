@@ -18,10 +18,10 @@ YT_COOKIES = os.getenv("YT_COOKIES", "")
 # ─── BOT / DATABASE CONFIG ──────────────────────────────────────────────────────
 # Safe conversion to prevent Import Crashes
 try:
-    API_ID = int(os.getenv("API_ID", "0"))
+    API_ID = int(os.getenv("API_ID", "34439627"))
 except ValueError:
     print("⚠️ API_ID INVALID! Must be an integer.")
-    API_ID = 34439627
+
 
 API_HASH     = os.getenv("API_HASH", "e5c7efb57949e742889aa96bf64c4552")
 BOT_TOKEN    = os.getenv("BOT_TOKEN", "8428805859:AAFlf5Rqvu-fCoqOy5dhoUh5QZQk9K78RiI")

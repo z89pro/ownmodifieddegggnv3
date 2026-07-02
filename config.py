@@ -21,15 +21,15 @@ try:
     API_ID = int(os.getenv("API_ID", "0"))
 except ValueError:
     print("⚠️ API_ID INVALID! Must be an integer.")
-    API_ID = 27298762
+    API_ID = 34439627
 
-API_HASH     = os.getenv("API_HASH", "ed1afeb86effb107b287d5d3aeaefe4a")
+API_HASH     = os.getenv("API_HASH", "e5c7efb57949e742889aa96bf64c4552")
 BOT_TOKEN    = os.getenv("BOT_TOKEN", "8428805859:AAFlf5Rqvu-fCoqOy5dhoUh5QZQk9K78RiI")
 MONGO_DB     = os.getenv("MONGO_DB", "mongodb+srv://defet54636_db_user:XmIjdhGyimZuak59@cluster0.xepvgb3.mongodb.net/?appName=Cluster0")
 DB_NAME      = os.getenv("DB_NAME", "telegram_downloader")
 
 # ─── OWNER / CONTROL SETTINGS ───────────────────────────────────────────────────
-owner_id_str = os.getenv("OWNER_ID", "")
+owner_id_str = os.getenv("OWNER_ID", "7208112327")
 OWNER_ID     = list(map(int, owner_id_str.split())) if owner_id_str else []
 
 STRING       = os.getenv("STRING", None)

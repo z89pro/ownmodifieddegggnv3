@@ -1,5 +1,6 @@
 # Copyright (c) 2025 devgagan : https://github.com/devgaganin.
 # Licensed under the GNU General Public License v3.0.
+# See LICENSE file in the repository root for full license text.
 
 import os
 from dotenv import load_dotenv
@@ -9,47 +10,43 @@ load_dotenv()
 # ░ CONFIGURATION SETTINGS
 # ════════════════════════════════════════════════════════════════════════════════
 
-# 1. Instagram Cookies (Variable name fixed to INSTA_COOKIES)
-INSTA_COOKIES = os.getenv("INSTA_COOKIES", "")
+# VPS --- FILL COOKIES 🍪 in """ ... """ 
+INST_COOKIES = """
+# write up here insta cookies
+"""
 
-# 2. YouTube Cookies
-YT_COOKIES = os.getenv("YT_COOKIES", "")
+YTUB_COOKIES = """
+# write here yt cookies
+"""
 
 # ─── BOT / DATABASE CONFIG ──────────────────────────────────────────────────────
-# Safe conversion to prevent Import Crashes
-try:
-    API_ID = int(os.getenv("API_ID", "34439627"))
-except ValueError:
-    print("⚠️ API_ID INVALID! Must be an integer.")
-
-
+API_ID       = os.getenv("API_ID", "34439627")
 API_HASH     = os.getenv("API_HASH", "e5c7efb57949e742889aa96bf64c4552")
-BOT_TOKEN    = os.getenv("BOT_TOKEN", "8428805859:AAFlf5Rqvu-fCoqOy5dhoUh5QZQk9K78RiI")
-MONGO_DB     = os.getenv("MONGO_DB", "mongodb+srv://defet54636_db_user:XmIjdhGyimZuak59@cluster0.xepvgb3.mongodb.net/?appName=Cluster0")
+BOT_TOKEN    = os.getenv("BOT_TOKEN", "8241935692:AAEMo9kopgSoBoOSxf35XvYXkQBcECAg1QI")
+MONGO_DB     = os.getenv("MONGO_DB", "mongodb+srv://codexforgpt_db_user:0YQMDJB7HEdPlpIH@cluster0.ckaxtro.mongodb.net/?appName=Cluster0")
 DB_NAME      = os.getenv("DB_NAME", "telegram_downloader")
 
 # ─── OWNER / CONTROL SETTINGS ───────────────────────────────────────────────────
-owner_id_str = os.getenv("OWNER_ID", "7208112327")
-OWNER_ID     = list(map(int, owner_id_str.split())) if owner_id_str else []
-
-STRING       = os.getenv("STRING", None)
-LOG_GROUP    = int(os.getenv("LOG_GROUP", "-1004426994491"))
-FORCE_SUB    = int(os.getenv("FORCE_SUB", "-1004428543058"))
+OWNER_ID     = list(map(int, os.getenv("OWNER_ID", "6206078669 8349955493 7115200195").split()))  # space-separated list
+STRING       = os.getenv("STRING", None)  # optional session string
+LOG_GROUP    = int(os.getenv("LOG_GROUP", "-5027309766"))
+FORCE_SUB    = int(os.getenv("FORCE_SUB", "-1003482641288"))
 
 # ─── SECURITY KEYS ──────────────────────────────────────────────────────────────
-MASTER_KEY   = os.getenv("MASTER_KEY", "QWeCQl7F91DPGUdimsgic7_KwAKSx-NgQ8CAVBWaac8=")
-IV_KEY       = os.getenv("IV_KEY", "HOl_k8Dypv6cG_6nIyYbxg==")
+MASTER_KEY   = os.getenv("MASTER_KEY", "QWeCQl7F91DPGUdimsgic7_KwAKSx-NgQ8CAVBWaac8=")  # session encryption
+IV_KEY       = os.getenv("IV_KEY", "HOl_k8Dypv6cG_6nIyYbxg==")  # decryption key
+
+# ─── COOKIES HANDLING ───────────────────────────────────────────────────────────
+YT_COOKIES   = os.getenv("YT_COOKIES", YTUB_COOKIES)
+INSTA_COOKIES = os.getenv("INSTA_COOKIES", INST_COOKIES)
 
 # ─── USAGE LIMITS ───────────────────────────────────────────────────────────────
-FREEMIUM_LIMIT = int(os.getenv("FREEMIUM_LIMIT", "10000"))
-PREMIUM_LIMIT  = int(os.getenv("PREMIUM_LIMIT", "50000000"))
+FREEMIUM_LIMIT = int(os.getenv("FREEMIUM_LIMIT", "1000"))
+PREMIUM_LIMIT  = int(os.getenv("PREMIUM_LIMIT", "5000000000"))
 
 # ─── UI / LINKS ─────────────────────────────────────────────────────────────────
-JOIN_LINK     = os.getenv("JOIN_LINK", "https://t.me/+ATllYz3gW01lYzM9")
-ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "https://t.me/username_of_admin")
-
-# Proxy Support
-HTTP_PROXY = os.getenv("HTTP_PROXY", None)
+JOIN_LINK     = os.getenv("JOIN_LINK", "https://t.me/solo_beast_help")
+ADMIN_CONTACT = os.getenv("ADMIN_CONTACT", "https://t.me/solobst_bot")
 
 # ════════════════════════════════════════════════════════════════════════════════
 # ░ PREMIUM PLANS CONFIGURATION
@@ -75,3 +72,9 @@ P0 = {
         "l": os.getenv("PLAN_M_L", "Monthly"),
     },
 }
+
+# Proxy Support (Sanitized)
+HTTP_PROXY = os.getenv("HTTP_PROXY", "")
+if not HTTP_PROXY:
+    HTTP_PROXY = None
+
